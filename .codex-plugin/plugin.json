@@ -1,19 +1,25 @@
 {
   "name": "codex-orchestration",
   "version": "0.1.0",
-  "description": "Codex Orchestration plugin",
+  "description": "A portable MCP bridge for the local Symphony managed control plane.",
   "author": {
-    "name": "Local developer"
+    "name": "Codex Orchestration contributors"
   },
+  "license": "Apache-2.0",
+  "keywords": ["codex", "symphony", "orchestration", "mcp"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Orchestration",
-    "shortDescription": "Use Codex Orchestration in Codex.",
-    "longDescription": "Codex Orchestration adds a local Codex plugin scaffold.",
-    "developerName": "Local developer",
+    "shortDescription": "Operate a local Symphony control plane.",
+    "longDescription": "Read managed state and submit explicit lifecycle operations through an authenticated loopback bridge.",
+    "developerName": "Codex Orchestration contributors",
     "category": "Productivity",
-    "capabilities": [],
-    "defaultPrompt": "Help me use Codex Orchestration."
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": [
+      "Inspect the managed orchestration state.",
+      "Review recent orchestration events.",
+      "Prepare a managed lifecycle operation."
+    ]
   },
   "mcpServers": "./.mcp.json"
 }

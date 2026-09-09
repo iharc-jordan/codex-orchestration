@@ -1,0 +1,20 @@
+# Managed API contract
+
+This directory is the checked interface shared by the TypeScript bridge and the
+Symphony service tests. The bridge sends the JSON shape in
+`managed-contract-fixtures.json` without renaming, filling, retrying, or replaying
+caller-owned write fields.
+
+The loopback service exposes `GET /api/v1/managed/state`,
+`GET /api/v1/managed/events?after=N&wait_ms=M&limit=L`, and
+`POST /api/v1/managed/control`. Control bodies always contain `request_id`,
+`operation`, and an operation-specific `args` object. `wait_ms` is at most 60000;
+`limit` is at most 100. Mutations preserve `request_id` and any
+`expected_revision` supplied in `args`; uncertain writes are returned as errors
+and are never retried by this bridge.
+
+The exact operation-specific argument fields and error payload envelope remain
+pending the managed Elixir endpoint implementation. This fixture deliberately
+keeps `args` extensible so both sides can add fields without a second scheduler
+or a duplicate assignment database. The bridge rejects unsupported operation
+names and oversized requests before contacting the service.

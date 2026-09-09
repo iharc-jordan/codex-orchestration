@@ -1,0 +1,37 @@
+{
+  "operations": ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"],
+  "control_request": {
+    "request_id": "fixture-request-001",
+    "operation": "enroll",
+    "args": {
+      "issue_id": "project-item-1",
+      "revision": 4,
+      "base_git_commit": "0123456789abcdef0123456789abcdef01234567",
+      "ownership": { "generation": 2 },
+      "resources": ["repo:owner/name"],
+      "route": { "model": "gpt-5.6-luna", "effort": "xhigh" }
+    }
+  },
+  "state": {
+    "state": "READY",
+    "revision": 4,
+    "latest_cursor": 12
+  },
+  "events": {
+    "after": 12,
+    "wait_ms": 1000,
+    "limit": 100,
+    "events": []
+  },
+  "error_codes": [
+    "config_missing",
+    "config_invalid",
+    "config_non_loopback",
+    "config_token_permissions",
+    "request_id_invalid",
+    "events_wait_invalid",
+    "events_limit_invalid",
+    "stale_revision",
+    "unknown_operation"
+  ]
+}

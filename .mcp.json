@@ -1,3 +1,9 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "codex-orchestration": {
+      "command": "node",
+      "cwd": ".",
+      "args": ["./mcp/server.mjs"]
+    }
+  }
 }

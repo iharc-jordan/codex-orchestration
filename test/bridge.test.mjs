@@ -1,0 +1,185 @@
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { once } from "node:events";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import test from "node:test";
+import { validateConfig } from "../dist/config.js";
+import { toWslPath } from "../dist/paths.js";
+
+const execFileAsync = promisify(execFile);
+const wslNode = "/home/jordan/.nvm/versions/node/v24.13.1/bin/node";
+
+async function writeWslFile(path, contents) {
+  const script = "const fs=require('node:fs'); fs.writeFileSync(process.argv[1], Buffer.from(process.argv[2], 'base64'), { mode: 0o600 });";
+  await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", wslNode, "-e", script, path, Buffer.from(contents).toString("base64")]);
+}
+
+async function removeWslPath(path) {
+  await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", "/bin/rm", "-rf", path]).catch(() => undefined);
+}
+
+async function startFixture(token) {
+  const seen = [];
+  let rejectAuth = false;
+  const fixture = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : undefined;
+    seen.push({ method: request.method, url: request.url, body, authorization: request.headers.authorization });
+    response.setHeader("content-type", "application/json");
+    if (rejectAuth || request.headers.authorization !== `Bearer ${token}`) {
+      response.statusCode = 401;
+      response.end(JSON.stringify({ error: { code: "unauthorized", detail: token } }));
+      return;
+    }
+    if (request.url?.startsWith("/api/v1/managed/state")) {
+      response.end(JSON.stringify({ state: "READY", revision: 9, latest_cursor: 7 }));
+      return;
+    }
+    if (request.url?.startsWith("/api/v1/managed/events")) {
+      response.end(JSON.stringify({ events: [], latest_cursor: 7 }));
+      return;
+    }
+    if (request.url === "/api/v1/managed/control") {
+      if (body.request_id === "stale-1") {
+        response.statusCode = 409;
+        response.end(JSON.stringify({ error: { code: "stale_revision", detail: token } }));
+        return;
+      }
+      response.end(JSON.stringify({ accepted: true, request_id: body.request_id }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: { code: "not_found" } }));
+  });
+  fixture.listen(0, "127.0.0.1");
+  await once(fixture, "listening");
+  return { fixture, seen, port: fixture.address().port, setRejectAuth: (value) => { rejectAuth = value; } };
+}
+
+function readJsonLines(child) {
+  let buffer = "";
+  const pending = [];
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    buffer += chunk;
+    let newline;
+    while ((newline = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line) continue;
+      const message = JSON.parse(line);
+      const index = pending.findIndex((entry) => entry.id === message.id);
+      if (index >= 0) pending.splice(index, 1)[0].resolve(message);
+    }
+  });
+  return (id, method, params = {}) => new Promise((resolve, reject) => {
+    pending.push({ id, resolve, reject });
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    const timer = setTimeout(() => reject(new Error(`Timed out waiting for MCP response ${id}`)), 10_000);
+    const entry = pending[pending.length - 1];
+    entry.resolve = (message) => { clearTimeout(timer); resolve(message); };
+  });
+}
+
+test("bundled stdio bridge performs authenticated state, events, and controls", async (t) => {
+  const token = "fixture-secret-token";
+  const root = process.platform === "win32"
+    ? `/tmp/codex-orchestration-test-${process.pid}-${Date.now()}`
+    : realpathSync.native(await mkdtemp(join(tmpdir(), "codex-orchestration-test-")));
+  const tokenFile = process.platform === "win32" ? `${root}/token` : join(root, "token");
+  const configFile = process.platform === "win32" ? `${root}/config.json` : join(root, "config.json");
+  const upstream = await startFixture(token);
+  const bridgeTokenFile = tokenFile;
+  const bridgeConfigFile = configFile;
+  const config = JSON.stringify({ host: "127.0.0.1", port: upstream.port, token_file: bridgeTokenFile });
+  if (process.platform === "win32") {
+    await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", "/bin/mkdir", "-p", root]);
+    await writeWslFile(tokenFile, `${token}\n`);
+    await writeWslFile(configFile, config);
+  } else {
+    await writeFile(tokenFile, `${token}\n`);
+    await chmod(tokenFile, 0o600);
+    await writeFile(configFile, config);
+  }
+  const child = spawn(process.execPath, [join(process.cwd(), "mcp/server.mjs")], {
+    cwd: process.cwd(),
+    env: { ...process.env, CODEX_ORCHESTRATION_CONFIG: bridgeConfigFile },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  t.after(async () => {
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await once(child, "close").catch(() => undefined);
+    }
+    upstream.fixture.close();
+    if (process.platform === "win32") await removeWslPath(root);
+    else await rm(root, { recursive: true, force: true });
+  });
+
+  const request = readJsonLines(child);
+  const initialized = await request(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
+  assert.equal(initialized.result.serverInfo.name, "codex-orchestration");
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} })}\n`);
+  const listed = await request(2, "tools/list");
+  const names = listed.result.tools.map((tool) => tool.name);
+  assert.deepEqual(names, [
+    "orchestration_diagnostics", "orchestration_state", "orchestration_events",
+    "orchestration_bind_project", "orchestration_enroll", "orchestration_revise",
+    "orchestration_pause", "orchestration_resume", "orchestration_interrupt",
+    "orchestration_cancel", "orchestration_review"
+  ]);
+
+  const state = await request(3, "tools/call", { name: "orchestration_state", arguments: {} });
+  assert.deepEqual(JSON.parse(state.result.content[0].text), { state: "READY", revision: 9, latest_cursor: 7 });
+  const events = await request(4, "tools/call", { name: "orchestration_events", arguments: { after: 7, wait_ms: 42, limit: 100 } });
+  assert.deepEqual(JSON.parse(events.result.content[0].text), { events: [], latest_cursor: 7 });
+  assert.equal(new URL(upstream.seen[1].url, "http://127.0.0.1").search, "?after=7&wait_ms=42&limit=100");
+
+  const pauseArguments = { request_id: "pause-1", args: { expected_revision: 9, reason: "fixture" } };
+  await request(5, "tools/call", { name: "orchestration_pause", arguments: pauseArguments });
+  await request(6, "tools/call", { name: "orchestration_pause", arguments: pauseArguments });
+  const writes = upstream.seen.filter((entry) => entry.method === "POST");
+  assert.equal(writes.length, 2);
+  assert.deepEqual(writes[0].body, writes[1].body);
+  assert.equal(writes[0].body.request_id, "pause-1");
+  assert.equal(writes[0].body.args.expected_revision, 9);
+
+  const stale = await request(7, "tools/call", { name: "orchestration_enroll", arguments: { request_id: "stale-1", args: { expected_revision: 8 } } });
+  assert.equal(stale.result.isError, true);
+  assert.match(stale.result.content[0].text, /stale_revision/);
+  assert.doesNotMatch(stale.result.content[0].text, new RegExp(token));
+
+  upstream.setRejectAuth(true);
+  const unauthorized = await request(8, "tools/call", { name: "orchestration_state", arguments: {} });
+  assert.equal(unauthorized.result.isError, true);
+  assert.doesNotMatch(unauthorized.result.content[0].text, new RegExp(token));
+});
+
+test("configuration validation rejects non-loopback and broad token permissions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-orchestration-config-"));
+  const tokenFile = join(root, "token");
+  const configFile = join(root, "config.json");
+  await writeFile(tokenFile, "secret");
+  await writeFile(configFile, JSON.stringify({ host: "10.0.0.1", port: 1234, token_file: tokenFile }));
+  process.env.CODEX_ORCHESTRATION_CONFIG = configFile;
+  assert.equal((await validateConfig()).valid, false);
+  if (process.platform !== "win32") {
+    await writeFile(configFile, JSON.stringify({ host: "127.0.0.1", port: 1234, token_file: tokenFile }));
+    await chmod(tokenFile, 0o644);
+    assert.match((await validateConfig()).error, /permissions/);
+  }
+  delete process.env.CODEX_ORCHESTRATION_CONFIG;
+    if (process.platform === "win32") await removeWslPath(root);
+    else await rm(root, { recursive: true, force: true });
+});
+
+test("Windows launcher conversion preserves spaces without shell interpolation", () => {
+  assert.equal(toWslPath("C:\\Users\\Jordan Stevenson\\Codex Orchestration\\mcp\\server.mjs"), "/mnt/c/Users/Jordan Stevenson/Codex Orchestration/mcp/server.mjs");
+  assert.throws(() => toWslPath("\\\\server\\share\\server.mjs"), /local Windows drive/);
+});

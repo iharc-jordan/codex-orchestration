@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestration.local/contracts/managed-contract.json",
+  "title": "Symphony managed control contract",
+  "type": "object",
+  "required": ["operations", "control_request", "error_codes"],
+  "properties": {
+    "operations": {
+      "type": "array",
+      "items": { "enum": ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"] },
+      "minItems": 8,
+      "maxItems": 8,
+      "uniqueItems": true
+    },
+    "control_request": {
+      "type": "object",
+      "required": ["request_id", "operation", "args"],
+      "properties": {
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "operation": { "enum": ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"] },
+        "args": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
+    "error_codes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}
