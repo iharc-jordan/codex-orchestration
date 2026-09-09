@@ -36,12 +36,13 @@ curated marketplace requirement or assumed desktop-sidebar worker integration.
 | Required WSL toolchain and real worker proof | ACCEPTED | PM verified |
 | Additive github_projects tracker | ACCEPTED: 312 tests, full gate, both live reads; integrated d50dfaf | PM verified |
 | Generic hook context | ACCEPTED: 308 tests, full gate, integrated c3397b5 | PM verified |
-| Managed AppServer routes, resume and reports | R1 tested: 7526f12, full make all; independent review pending | AppServer worker |
+| Managed AppServer routes, resume and reports | R1 tested: 7526f12; independent review found final-turn budget classification defect, correction active | AppServer worker |
 | Managed process containment and permission proof | ACTIVE R2 | AppServer worker |
 | Managed journal/lifecycle/controls | ACTIVE: feature/managed-core from d50dfaf | projects worker |
 | Plugin MCP/client/skills | ACCEPTED R1: 63d6972; operation schemas follow core | PM verified |
 | Service setup and launchers | ACCEPTED R2: 08dabb8, Linux and Windows lifecycle fixtures | PM verified |
-| Release dependencies and executable | ACTIVE: separate downstream patch | bridge worker |
+| Release dependencies | ACCEPTED: 137e8d1, full gate with 324 tests and clean dependency audit; integrated 66e2b94 | PM verified |
+| Self-contained executable and runtime notices | WAITING on combined runtime candidate | bridge worker |
 | Personal marketplace installation/discovery | ACCEPTED: installed 0.1.0, actual fresh-task MCP diagnostics | PM verified |
 | Installed disposable workflow and recovery | WAITING on implementation | PM |
 | Fresh IHARC PM pilot | WAITING on installed proof | PM |
@@ -185,7 +186,7 @@ neither `node_modules` nor Git metadata. Its bundled bridge listed all 11 MCP
 tools, answered diagnostics through WSL, and exited successfully on disconnect.
 Public Git fetching remains a later release check.
 
-Create the approved private IHARC Labs GitHub Project. A fresh Astra PM selects
+The approved private IHARC Labs GitHub Project exists. A fresh Astra PM selects
 one bounded already-authorized delivery from existing IHARC work and uses the
 installed service. Preserve paused tasks and private data. Public release follows
 acceptance, not merely worker completion; upstream PR submission is required,
