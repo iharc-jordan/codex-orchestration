@@ -14,6 +14,18 @@ Plugin name `codex-orchestration`; Apache-2.0. Local development until disposabl
 checks and one real IHARC delivery pass. Then publish the plugin and Symphony
 integration source and submit independent Projects and hook-context PRs.
 
+Public installation must work from a pinned Git marketplace without asking users
+to build TypeScript. Ship the generated runtime bundle in the plugin package and
+tagged source used by that marketplace (for example `mcp/server.mjs`, not an
+ignored `dist` dependency). A repository marketplace can point to `./`: official
+docs confirm paths resolve relative to repository root and example plugin-folder
+layouts are not mandatory. Validate this with a clean temporary Codex home before
+release. Preserve the existing personal marketplace entry for local development.
+
+The installed openai-developers MCP configuration provides a working local
+pattern: `command: node`, `cwd: .`, `args: [./mcp/server.mjs]`. Verify the same
+relative-path behavior from this plugin's actual installed cache.
+
 No Project State integration, native Windows worker runtime, distributed claims,
 curated marketplace requirement or assumed desktop-sidebar worker integration.
 
