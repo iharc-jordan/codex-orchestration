@@ -6,7 +6,7 @@ scheduler.
 
 The first setup uses an explicit Symphony release executable and a private
 workflow file. Download the executable and `build-receipt.json` from the
-[pinned runtime release](https://github.com/iharc-jordan/symphony/releases/tag/v0.1.5)
+[pinned runtime release](https://github.com/iharc-jordan/symphony/releases/tag/v0.1.6)
 and compare its SHA256 with the receipt. On Linux, mark the downloaded file
 executable with `chmod +x symphony_linux_x86_64`. Windows users should place it
 in their Ubuntu WSL home and pass its Linux path to setup. Building from source
@@ -15,7 +15,7 @@ Use the [generic workflow example](../fixtures/WORKFLOW.example.md) as a startin
 point and replace its paths and Project owner before setup:
 
 ```text
-node ./mcp/cli.mjs setup --executable /path/to/symphony_linux_x86_64 --workflow /path/to/WORKFLOW.md --version 0.1.5 --port 8787
+node ./mcp/cli.mjs setup --executable /path/to/symphony_linux_x86_64 --workflow /path/to/WORKFLOW.md --version 0.1.6 --port 8787
 ```
 
 Setup creates separate XDG configuration, data, and state roots. Configuration

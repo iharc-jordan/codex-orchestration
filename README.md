@@ -4,8 +4,8 @@ A Codex plugin for an Astra PM working with a persistent pool of 5.6 workers,
 using OpenAI Symphony on Ubuntu and GitHub Projects for workflow state.
 
 **Development snapshot:** installed disposable assignments and real process
-recovery have passed. The bounded real pilot is paused for a runtime repair;
-public release validation remains pending. See the
+recovery have passed. The repaired runtime is installed and the bounded real
+pilot is in progress; public release validation remains pending. See the
 [delivery record](docs/implementation.md) for the current evidence boundary.
 
 ## How it works
@@ -36,7 +36,7 @@ codex plugin add codex-orchestration@codex-orchestration
 ```
 
 Download `symphony_linux_x86_64` and its build receipt from the matching
-[Symphony release](https://github.com/iharc-jordan/symphony/releases/tag/v0.1.5).
+[Symphony release](https://github.com/iharc-jordan/symphony/releases/tag/v0.1.6).
 The executable includes Erlang and the application dependencies; existing
 Codex, GitHub CLI, Node, Git, and systemd are still required. Follow the
 [setup instructions](docs/usage.md) to configure the service before enabling it.
