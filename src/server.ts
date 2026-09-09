@@ -1,8 +1,8 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { asBridgeError, ControlOperation, ManagedClient } from "./client.js";
+import { asBridgeError, BridgeError, ControlOperation, ManagedClient } from "./client.js";
 import { validateConfig } from "./config.js";
 import { resolvedScriptPath, toWslPath } from "./paths.js";
 
@@ -79,7 +79,9 @@ async function runBridge(): Promise<void> {
       const operation = name.replace(/^orchestration_/, "") as ControlOperation;
       if (controlOperations.includes(operation)) {
         const args = request.params.arguments ?? {};
-        if (!("args" in args)) throw new Error("args is required and must be supplied by the caller");
+        if (!args || typeof args !== "object" || Array.isArray(args) || !("args" in args)) {
+          throw new BridgeError("args_invalid", "args is required and must be supplied by the caller");
+        }
         return jsonResult(await client.control({
           request_id: args.request_id as string,
           operation,
@@ -97,7 +99,8 @@ async function runBridge(): Promise<void> {
 
 function runWindowsLauncher(): void {
   const script = resolvedScriptPath(process.argv[1]);
-  const wslNode = process.env.CODEX_ORCHESTRATION_WSL_NODE || "/home/jordan/.nvm/versions/node/v24.13.1/bin/node";
+  const configuredNode = process.env.CODEX_ORCHESTRATION_WSL_NODE?.trim();
+  const wslNode = configuredNode || resolveWslNode();
   const environment = { ...process.env };
   for (const name of ["CODEX_ORCHESTRATION_CONFIG", "XDG_CONFIG_HOME"]) {
     const value = environment[name];
@@ -121,6 +124,21 @@ function runWindowsLauncher(): void {
   child.once("close", (code) => {
     process.exitCode = code ?? 1;
   });
+}
+
+function resolveWslNode(): string {
+  let output: string;
+  try {
+    output = execFileSync("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lic", "node -p process.execPath"], {
+      encoding: "utf8",
+      windowsHide: true
+    });
+  } catch {
+    throw new Error("Could not resolve a Linux Node runtime in the Ubuntu WSL environment; set CODEX_ORCHESTRATION_WSL_NODE");
+  }
+  const candidate = output.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^\/(?!mnt\/)[^\r\n]+\/node$/.test(line)).pop();
+  if (!candidate) throw new Error("Ubuntu WSL did not return a Linux Node runtime; set CODEX_ORCHESTRATION_WSL_NODE");
+  return candidate;
 }
 
 if (process.platform === "win32") runWindowsLauncher();

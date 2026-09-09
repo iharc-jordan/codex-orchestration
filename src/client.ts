@@ -30,12 +30,12 @@ function endpointHost(host: string): string {
   return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }
 
-function safeMessage(status: number, body: unknown): string {
+function safeMessage(status: number, body: unknown, token: string): string {
   if (status === 401 || status === 403) return "Symphony rejected the bridge credentials";
   if (body && typeof body === "object" && "error" in body) {
     const error = (body as { error?: unknown }).error;
     const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
-    if (typeof code === "string" && /^[a-z0-9_:-]{1,80}$/.test(code)) {
+    if (typeof code === "string" && /^[a-z0-9_:-]{1,80}$/.test(code) && !code.includes(token)) {
       return `Symphony request failed: ${code}`;
     }
   }
@@ -94,14 +94,34 @@ export class ManagedClient {
     }
     let parsed: unknown = null;
     try {
-      const text = await response.text();
-      if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) throw new BridgeError("upstream_response_too_large", "Symphony response exceeds the bridge limit", response.status);
-      parsed = text ? JSON.parse(text) : null;
+      const reader = response.body?.getReader();
+      if (!reader) {
+        parsed = null;
+      } else {
+        const chunks: Buffer[] = [];
+        let bytes = 0;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            bytes += value.byteLength;
+            if (bytes > MAX_RESPONSE_BYTES) {
+              await reader.cancel().catch(() => undefined);
+              throw new BridgeError("upstream_response_too_large", "Symphony response exceeds the bridge limit", response.status);
+            }
+            chunks.push(Buffer.from(value));
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        const text = Buffer.concat(chunks).toString("utf8");
+        parsed = text ? JSON.parse(text) : null;
+      }
     } catch (error) {
       if (error instanceof BridgeError) throw error;
       throw new BridgeError("upstream_invalid_response", response.ok ? "Symphony returned invalid JSON" : `Symphony request failed with HTTP ${response.status}`, response.status);
     }
-    if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed), response.status);
+    if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed, this.token), response.status);
     return parsed;
   }
 }

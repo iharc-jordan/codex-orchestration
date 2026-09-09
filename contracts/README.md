@@ -18,3 +18,9 @@ pending the managed Elixir endpoint implementation. This fixture deliberately
 keeps `args` extensible so both sides can add fields without a second scheduler
 or a duplicate assignment database. The bridge rejects unsupported operation
 names and oversized requests before contacting the service.
+
+On Windows, the launcher runs the bundle in the configured Ubuntu WSL
+environment and resolves `node` from the login environment. If that environment
+does not provide the intended Linux runtime, set
+`CODEX_ORCHESTRATION_WSL_NODE` to its absolute WSL path. The override is passed
+as a process argument, never interpolated into a shell command.

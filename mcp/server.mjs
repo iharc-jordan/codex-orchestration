@@ -7198,7 +7198,7 @@ var require_dist = __commonJS({
 });
 
 // src/server.ts
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 // node_modules/zod/v4/core/util.js
 var util_exports = {};
@@ -16861,12 +16861,12 @@ var MAX_RESPONSE_BYTES = 1048576;
 function endpointHost(host) {
   return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }
-function safeMessage(status, body) {
+function safeMessage(status, body, token) {
   if (status === 401 || status === 403) return "Symphony rejected the bridge credentials";
   if (body && typeof body === "object" && "error" in body) {
     const error2 = body.error;
     const code = error2 && typeof error2 === "object" && "code" in error2 ? error2.code : void 0;
-    if (typeof code === "string" && /^[a-z0-9_:-]{1,80}$/.test(code)) {
+    if (typeof code === "string" && /^[a-z0-9_:-]{1,80}$/.test(code) && !code.includes(token)) {
       return `Symphony request failed: ${code}`;
     }
   }
@@ -16924,14 +16924,34 @@ var ManagedClient = class _ManagedClient {
     }
     let parsed = null;
     try {
-      const text = await response.text();
-      if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) throw new BridgeError("upstream_response_too_large", "Symphony response exceeds the bridge limit", response.status);
-      parsed = text ? JSON.parse(text) : null;
+      const reader = response.body?.getReader();
+      if (!reader) {
+        parsed = null;
+      } else {
+        const chunks = [];
+        let bytes = 0;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            bytes += value.byteLength;
+            if (bytes > MAX_RESPONSE_BYTES) {
+              await reader.cancel().catch(() => void 0);
+              throw new BridgeError("upstream_response_too_large", "Symphony response exceeds the bridge limit", response.status);
+            }
+            chunks.push(Buffer.from(value));
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        const text = Buffer.concat(chunks).toString("utf8");
+        parsed = text ? JSON.parse(text) : null;
+      }
     } catch (error2) {
       if (error2 instanceof BridgeError) throw error2;
       throw new BridgeError("upstream_invalid_response", response.ok ? "Symphony returned invalid JSON" : `Symphony request failed with HTTP ${response.status}`, response.status);
     }
-    if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed), response.status);
+    if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed, this.token), response.status);
     return parsed;
   }
 };
@@ -17021,7 +17041,9 @@ async function runBridge() {
       const operation = name.replace(/^orchestration_/, "");
       if (controlOperations.includes(operation)) {
         const args = request.params.arguments ?? {};
-        if (!("args" in args)) throw new Error("args is required and must be supplied by the caller");
+        if (!args || typeof args !== "object" || Array.isArray(args) || !("args" in args)) {
+          throw new BridgeError("args_invalid", "args is required and must be supplied by the caller");
+        }
         return jsonResult(await client.control({
           request_id: args.request_id,
           operation,
@@ -17037,7 +17059,8 @@ async function runBridge() {
 }
 function runWindowsLauncher() {
   const script = resolvedScriptPath(process.argv[1]);
-  const wslNode = process.env.CODEX_ORCHESTRATION_WSL_NODE || "/home/jordan/.nvm/versions/node/v24.13.1/bin/node";
+  const configuredNode = process.env.CODEX_ORCHESTRATION_WSL_NODE?.trim();
+  const wslNode = configuredNode || resolveWslNode();
   const environment = { ...process.env };
   for (const name of ["CODEX_ORCHESTRATION_CONFIG", "XDG_CONFIG_HOME"]) {
     const value = environment[name];
@@ -17060,6 +17083,20 @@ function runWindowsLauncher() {
   child.once("close", (code) => {
     process.exitCode = code ?? 1;
   });
+}
+function resolveWslNode() {
+  let output;
+  try {
+    output = execFileSync("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lic", "node -p process.execPath"], {
+      encoding: "utf8",
+      windowsHide: true
+    });
+  } catch {
+    throw new Error("Could not resolve a Linux Node runtime in the Ubuntu WSL environment; set CODEX_ORCHESTRATION_WSL_NODE");
+  }
+  const candidate = output.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^\/(?!mnt\/)[^\r\n]+\/node$/.test(line)).pop();
+  if (!candidate) throw new Error("Ubuntu WSL did not return a Linux Node runtime; set CODEX_ORCHESTRATION_WSL_NODE");
+  return candidate;
 }
 if (process.platform === "win32") runWindowsLauncher();
 else await runBridge();

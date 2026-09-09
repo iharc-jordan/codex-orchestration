@@ -8,24 +8,40 @@ import { once } from "node:events";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
+import { ManagedClient } from "../dist/client.js";
 import { validateConfig } from "../dist/config.js";
 import { toWslPath } from "../dist/paths.js";
 
 const execFileAsync = promisify(execFile);
-const wslNode = "/home/jordan/.nvm/versions/node/v24.13.1/bin/node";
 
-async function writeWslFile(path, contents) {
+async function resolveWslNode() {
+  const { stdout } = await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lic", "node -p process.execPath"]);
+  const value = stdout.trim().split(/\r?\n/).filter(Boolean).pop();
+  if (!value || !value.startsWith("/")) throw new Error("WSL login environment did not resolve a Linux Node runtime");
+  return value;
+}
+
+async function writeWslFile(path, contents, wslNode) {
   const script = "const fs=require('node:fs'); fs.writeFileSync(process.argv[1], Buffer.from(process.argv[2], 'base64'), { mode: 0o600 });";
   await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", wslNode, "-e", script, path, Buffer.from(contents).toString("base64")]);
 }
 
 async function removeWslPath(path) {
-  await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", "/bin/rm", "-rf", path]).catch(() => undefined);
+  await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", "/bin/rm", "-rf", path]);
 }
 
-async function startFixture(token) {
+async function closeFixture(fixture) {
+  if (!fixture.listening) return;
+  await new Promise((resolve, reject) => fixture.close((error) => error ? reject(error) : resolve()));
+}
+
+async function startFixture(token, host = "127.0.0.1") {
   const seen = [];
   let rejectAuth = false;
+  let errorCode = "unauthorized";
+  let errorStatus = 401;
+  let redirect = false;
+  let overflow = false;
   const fixture = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -33,8 +49,18 @@ async function startFixture(token) {
     seen.push({ method: request.method, url: request.url, body, authorization: request.headers.authorization });
     response.setHeader("content-type", "application/json");
     if (rejectAuth || request.headers.authorization !== `Bearer ${token}`) {
-      response.statusCode = 401;
-      response.end(JSON.stringify({ error: { code: "unauthorized", detail: token } }));
+      response.statusCode = errorStatus;
+      response.end(JSON.stringify({ error: { code: errorCode, detail: token } }));
+      return;
+    }
+    if (redirect && request.url?.startsWith("/api/v1/managed/state")) {
+      response.statusCode = 302;
+      response.setHeader("location", "/api/v1/managed/state");
+      response.end();
+      return;
+    }
+    if (overflow && request.url?.startsWith("/api/v1/managed/state")) {
+      response.end("x".repeat(1_048_577));
       return;
     }
     if (request.url?.startsWith("/api/v1/managed/state")) {
@@ -57,9 +83,18 @@ async function startFixture(token) {
     response.statusCode = 404;
     response.end(JSON.stringify({ error: { code: "not_found" } }));
   });
-  fixture.listen(0, "127.0.0.1");
+  fixture.listen(0, host);
   await once(fixture, "listening");
-  return { fixture, seen, port: fixture.address().port, setRejectAuth: (value) => { rejectAuth = value; } };
+  return {
+    fixture,
+    seen,
+    port: fixture.address().port,
+    setRejectAuth: (value) => { rejectAuth = value; },
+    setErrorCode: (value) => { errorCode = value; },
+    setErrorStatus: (value) => { errorStatus = value; },
+    setRedirect: (value) => { redirect = value; },
+    setOverflow: (value) => { overflow = value; }
+  };
 }
 
 function readJsonLines(child) {
@@ -89,6 +124,7 @@ function readJsonLines(child) {
 
 test("bundled stdio bridge performs authenticated state, events, and controls", async (t) => {
   const token = "fixture-secret-token";
+  const wslNode = process.platform === "win32" ? await resolveWslNode() : undefined;
   const root = process.platform === "win32"
     ? `/tmp/codex-orchestration-test-${process.pid}-${Date.now()}`
     : realpathSync.native(await mkdtemp(join(tmpdir(), "codex-orchestration-test-")));
@@ -100,8 +136,8 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   const config = JSON.stringify({ host: "127.0.0.1", port: upstream.port, token_file: bridgeTokenFile });
   if (process.platform === "win32") {
     await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", "/bin/mkdir", "-p", root]);
-    await writeWslFile(tokenFile, `${token}\n`);
-    await writeWslFile(configFile, config);
+    await writeWslFile(tokenFile, `${token}\n`, wslNode);
+    await writeWslFile(configFile, config, wslNode);
   } else {
     await writeFile(tokenFile, `${token}\n`);
     await chmod(tokenFile, 0o600);
@@ -115,9 +151,9 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   t.after(async () => {
     if (child.exitCode === null) {
       child.kill("SIGTERM");
-      await once(child, "close").catch(() => undefined);
+      await once(child, "close");
     }
-    upstream.fixture.close();
+    await closeFixture(upstream.fixture);
     if (process.platform === "win32") await removeWslPath(root);
     else await rm(root, { recursive: true, force: true });
   });
@@ -141,24 +177,57 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   assert.deepEqual(JSON.parse(events.result.content[0].text), { events: [], latest_cursor: 7 });
   assert.equal(new URL(upstream.seen[1].url, "http://127.0.0.1").search, "?after=7&wait_ms=42&limit=100");
 
+  const missingArgs = await request(5, "tools/call", { name: "orchestration_pause", arguments: { request_id: "missing-args" } });
+  assert.equal(missingArgs.result.isError, true);
+  assert.match(missingArgs.result.content[0].text, /args is required/);
+
   const pauseArguments = { request_id: "pause-1", args: { expected_revision: 9, reason: "fixture" } };
-  await request(5, "tools/call", { name: "orchestration_pause", arguments: pauseArguments });
   await request(6, "tools/call", { name: "orchestration_pause", arguments: pauseArguments });
+  await request(7, "tools/call", { name: "orchestration_pause", arguments: pauseArguments });
   const writes = upstream.seen.filter((entry) => entry.method === "POST");
   assert.equal(writes.length, 2);
   assert.deepEqual(writes[0].body, writes[1].body);
   assert.equal(writes[0].body.request_id, "pause-1");
   assert.equal(writes[0].body.args.expected_revision, 9);
 
-  const stale = await request(7, "tools/call", { name: "orchestration_enroll", arguments: { request_id: "stale-1", args: { expected_revision: 8 } } });
+  const stale = await request(8, "tools/call", { name: "orchestration_enroll", arguments: { request_id: "stale-1", args: { expected_revision: 8 } } });
   assert.equal(stale.result.isError, true);
   assert.match(stale.result.content[0].text, /stale_revision/);
   assert.doesNotMatch(stale.result.content[0].text, new RegExp(token));
 
   upstream.setRejectAuth(true);
-  const unauthorized = await request(8, "tools/call", { name: "orchestration_state", arguments: {} });
+  const unauthorized = await request(9, "tools/call", { name: "orchestration_state", arguments: {} });
   assert.equal(unauthorized.result.isError, true);
   assert.doesNotMatch(unauthorized.result.content[0].text, new RegExp(token));
+});
+
+test("client rejects redirects, handles IPv6 loopback, bounds responses, and redacts error codes", async (t) => {
+  const token = "fixture-secret-token";
+  const upstream = await startFixture(token);
+  const client = new ManagedClient({ host: "127.0.0.1", port: upstream.port, tokenFile: "unused", maxInputBytes: 16 * 1024 }, token);
+  t.after(() => closeFixture(upstream.fixture));
+
+  upstream.setRedirect(true);
+  await assert.rejects(() => client.state(), (error) => error.code === "upstream_unreachable");
+  upstream.setRedirect(false);
+  const ipv6 = await startFixture(token, "::1");
+  t.after(() => closeFixture(ipv6.fixture));
+  const ipv6Client = new ManagedClient({ host: "::1", port: ipv6.port, tokenFile: "unused", maxInputBytes: 16 * 1024 }, token);
+  assert.deepEqual(await ipv6Client.state(), { state: "READY", revision: 9, latest_cursor: 7 });
+
+  upstream.setOverflow(true);
+  await assert.rejects(() => client.state(), (error) => error.code === "upstream_response_too_large");
+  upstream.setOverflow(false);
+  upstream.setRejectAuth(true);
+  upstream.setErrorCode(token);
+  upstream.setErrorStatus(409);
+  const unauthorized = await assert.rejects(() => client.state(), (error) => {
+    assert.equal(error.code, "upstream_error");
+    assert.equal(error.message, "Symphony request failed with HTTP 409");
+    assert.doesNotMatch(error.message, new RegExp(token));
+    return true;
+  });
+  assert.equal(unauthorized, undefined);
 });
 
 test("configuration validation rejects non-loopback and broad token permissions", async () => {
@@ -175,8 +244,7 @@ test("configuration validation rejects non-loopback and broad token permissions"
     assert.match((await validateConfig()).error, /permissions/);
   }
   delete process.env.CODEX_ORCHESTRATION_CONFIG;
-    if (process.platform === "win32") await removeWslPath(root);
-    else await rm(root, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true });
 });
 
 test("Windows launcher conversion preserves spaces without shell interpolation", () => {
