@@ -1,0 +1,122 @@
+# Delivery contract
+
+Approved 2026-09-09. The user-visible implementation plan in the Codex task is
+the scope authority. This file records integration interfaces and current work.
+
+## Fixed architecture
+
+Symphony upstream baseline: `8001b52e3062495a16e520e4ceaf8f9de868c4d0`.
+One Ubuntu execution host, one managed GitHub Project, two concurrent workers.
+Windows desktop PM -> bundled stdio MCP bridge in WSL -> authenticated loopback
+Symphony API -> existing Orchestrator -> Codex App Server workers.
+
+Plugin name `codex-orchestration`; Apache-2.0. Local development until disposable
+checks and one real IHARC delivery pass. Then publish the plugin and Symphony
+integration source and submit independent Projects and hook-context PRs.
+
+No Project State integration, native Windows worker runtime, distributed claims,
+curated marketplace requirement or assumed desktop-sidebar worker integration.
+
+## Components and ownership
+
+| Component | State | Owner |
+| --- | --- | --- |
+| Required WSL toolchain and baseline build | ACTIVE | foundation worker |
+| Additive github_projects tracker | ACTIVE | projects worker |
+| Generic hook context | ACTIVE | hook worker |
+| Managed journal/lifecycle/AppServer routes | READY after interface review | pending |
+| Plugin MCP/CLI/launchers/skills | READY | pending |
+| Installed disposable workflow and recovery | WAITING on implementation | PM |
+| Fresh IHARC PM pilot | WAITING on installed proof | PM |
+| Public source/release/upstream PRs | WAITING on pilot | PM |
+
+All new implementation workers use an explicit 5.6 route. Existing workers keep
+their current route. Integration and release decisions remain with the PM.
+
+## Tracker and hook contract
+
+`tracker.kind = github_projects`; provider keys: `owner_type` (`user` or `org`),
+`owner`, `project_number`, `status_field_name` (default `Status`). Existing
+`active_states`, `terminal_states`, and required-label options stay under tracker.
+
+`Issue.id` is the Project item node ID. `Issue.identifier` is
+`owner/repository#number`. `native_ref` includes `project_id`, `project_item_id`,
+`issue_id` (underlying global issue node ID), `repository` (owner, name,
+name_with_owner, id, url), `issue_number`, and `content_type`.
+
+The Projects adapter is read-only and generic. The managed execution profile owns
+enrollment, board mutations and ACCEPTED prerequisite checks. A closed cancelled
+issue is never equivalent to an ACCEPTED prerequisite in managed execution.
+
+Hooks receive bounded JSON in `SYMPHONY_ISSUE_CONTEXT`: `id`, `identifier`,
+`native_ref`. No title, body, credentials or executable command is included.
+The proposed maximum is 16 KiB, with explicit failure on oversized context. The
+trusted checkout helper validates repository enrollment and uses Git argument
+arrays. It does not interpolate tracker strings into executable shell text.
+
+## Managed control interface v1
+
+All JSON wire keys use snake_case. The API binds only to loopback. Managed
+endpoints require a bearer token loaded from a private local file. The MCP bridge
+does not implement a second scheduler or retain a second assignment database.
+
+- `GET /api/v1/managed/state`: compact current state and latest cursor.
+- `GET /api/v1/managed/events?after=N&wait_ms=M&limit=L`: changed events;
+  wait <= 60000 ms, limit <= 100, durable monotonic cursor.
+- `POST /api/v1/managed/control`: `{request_id, operation, args}`. Repeating a
+  request ID with the same input returns the recorded result; different input
+  is a conflict. Assignment mutations include the expected current revision.
+
+Operations: `bind_project`, `enroll`, `revise`, `pause`, `resume`, `interrupt`,
+`cancel`, `review`. Read/control schemas and error values must be shared between
+the Elixir service tests and TypeScript bridge as checked fixtures.
+
+- Binding supplies explicit Project identity/status mapping/repository allowlist.
+- Enrollment references an existing issue/item and supplies revision, base Git
+  commit, ownership/resources, and the resolved allowed model/effort route.
+- Revision updates material requirements and invalidates conflicting old work.
+- Pause stops new dispatch/retries and drains healthy active work. Resume polls.
+- Interrupt/cancel reconcile the actual owned process state before release.
+- Review accepts current evidence, requests rework, or records WAITING.
+
+Setup/start/stop use the host service manager. Stop persists paused/disabled
+intent before stopping owned execution; install does not arm or dispatch work.
+
+The worker has an attempt-scoped dynamic `orchestration_report` tool for result,
+checkpoint and context-needed reports. It cannot accept work or invoke PM
+controls. Missing result/evidence is not successful acceptance.
+
+## Lifecycle invariants
+
+States: READY, ACTIVE, WAITING, REVIEW, ACCEPTED, CANCELLED. The board owns these
+workflow facts. disk_log persists execution intent/outcome, ownership generation,
+revision, route, attempt/thread/turn/workspace identity, blocked state, retries,
+event cursor, usage and pending publication. Do not duplicate full transcripts.
+
+Underlying issue identity and declared exclusive resources gate ownership even
+when Project membership IDs change. Unknown stop/side-effect state blocks
+conflicting dispatch and cleanup. Corrupt state fails visibly without resetting.
+
+Keep live thread continuation. After a confirmed process stop, resume the saved
+thread with a new recovery turn and current facts; do not replay an interrupted
+turn or silently substitute a fresh thread. The same existing global Codex CLI
+and account remain in use.
+
+Default Luna/xhigh; only Luna/max and Terra/xhigh or Terra/max with a reason.
+Do not silently change an existing route or delegate recursively. Two automatic
+transient retries maximum; 20 turns across an assignment allowance, not a new
+allowance on each retry. Optional worker budget excludes the external PM and
+documents delayed telemetry and in-flight overshoot.
+
+## Delivery evidence
+
+Record targeted checks, exact revisions and unresolved gaps per component. Run
+upstream make all and plugin typecheck/test/build/manifest validation after
+integration. Prove actual installed MCP operation, a multi-repository dependency
+workflow, interruption/recovery, route enforcement and host/client separation.
+
+Create the approved private IHARC Labs GitHub Project. A fresh Astra PM selects
+one bounded already-authorized delivery from existing IHARC work and uses the
+installed service. Preserve paused tasks and private data. Public release follows
+acceptance, not merely worker completion; upstream PR submission is required,
+upstream merge is not.

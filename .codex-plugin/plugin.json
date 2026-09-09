@@ -1,0 +1,19 @@
+{
+  "name": "codex-orchestration",
+  "version": "0.1.0",
+  "description": "Codex Orchestration plugin",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Orchestration",
+    "shortDescription": "Use Codex Orchestration in Codex.",
+    "longDescription": "Codex Orchestration adds a local Codex plugin scaffold.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Help me use Codex Orchestration."
+  },
+  "mcpServers": "./.mcp.json"
+}
