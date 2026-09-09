@@ -1,12 +1,17 @@
 {
   "name": "codex-orchestration",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260909173515",
   "description": "A portable MCP bridge for the local Symphony managed control plane.",
   "author": {
     "name": "Codex Orchestration contributors"
   },
   "license": "Apache-2.0",
-  "keywords": ["codex", "symphony", "orchestration", "mcp"],
+  "keywords": [
+    "codex",
+    "symphony",
+    "orchestration",
+    "mcp"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Orchestration",
@@ -14,7 +19,10 @@
     "longDescription": "Read managed state and submit explicit lifecycle operations through an authenticated loopback bridge.",
     "developerName": "Codex Orchestration contributors",
     "category": "Productivity",
-    "capabilities": ["Read", "Write"],
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
     "defaultPrompt": [
       "Inspect the managed orchestration state.",
       "Review recent orchestration events.",
