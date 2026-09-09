@@ -3,10 +3,10 @@
 A Codex plugin for an Astra PM working with a persistent pool of 5.6 workers,
 using OpenAI Symphony on Ubuntu and GitHub Projects for workflow state.
 
-**Development snapshot:** installed disposable assignments and real process
-recovery have passed. The repaired runtime is installed and the bounded real
-pilot is in progress; public release validation remains pending. See the
-[delivery record](docs/implementation.md) for the current evidence boundary.
+**Initial release:** installed disposable assignments, real process recovery,
+and a bounded production pilot have passed. The pilot reached PM acceptance
+after source integration, CI, and live deployment verification. See the
+[delivery record](docs/implementation.md) for the evidence and limits.
 
 ## How it works
 

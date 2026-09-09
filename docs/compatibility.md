@@ -11,13 +11,13 @@ The initial supported targets are Windows with Ubuntu WSL2 and native Ubuntu Lin
 | Codex CLI | 0.153.4 | Windows and Linux; existing account authentication |
 | GitHub CLI | 2.100.0 | Linux Projects and repository reads |
 | Node.js | 24.15.0 Windows; 24.13.1 Linux | Bridge development and focused tests |
-| Symphony source | `011c7233aa64307f63ac808c4e2802c8bebda819` / runtime `0.1.6` | Current candidate; qualified full gate passed 425 tests with zero failures, six skips, 100% configured coverage, format, specs, Credo, and Dialyzer |
-| Installed Symphony binary | `0.1.6` from `011c7233aa64307f63ac808c4e2802c8bebda819` | Upgrade/start verification passed with HTTP 200 and preserved MCP state; bounded PM pilot is resuming |
+| Symphony source | `011c7233aa64307f63ac808c4e2802c8bebda819` / runtime `0.1.6` | Release source; qualified full gate passed 425 tests with zero failures, six skips, 100% configured coverage, format, specs, Credo, and Dialyzer |
+| Installed Symphony binary | `0.1.6` from `011c7233aa64307f63ac808c4e2802c8bebda819` | Upgrade/start verification passed with HTTP 200 and preserved MCP state; bounded PM pilot accepted |
 | Elixir / OTP | Repository-pinned mise toolchain | Build and full upstream checks |
 
 Package metadata declares Node.js 20 or later. That declaration is not a claim that every intervening Node version has been tested. Release receipts must identify the exact plugin, Symphony integration and executable versions tested together.
 
-The Linux x86_64 release candidate embeds the reviewed OTP/ERTS runtime, so users
+The Linux x86_64 release embeds the reviewed OTP/ERTS runtime, so users
 do not need Elixir or Erlang development tools. Its custom ERTS targets Ubuntu
 24.04-compatible systems and dynamically uses host libraries, including
 `libcrypto.so.3`, `libtinfo.so.6`, `libz.so.1`, `libstdc++.so.6`, and glibc with
@@ -25,7 +25,7 @@ do not need Elixir or Erlang development tools. Its custom ERTS targets Ubuntu
 Git, Node and the existing authenticated Codex CLI are required at runtime.
 The tested host is Ubuntu under WSL2; a separate bare-metal installation has not
 yet been verified. macOS, ARM64 and native Windows worker binaries are not part
-of this candidate.
+of this release.
 
 ## Execution and recovery boundaries
 
@@ -41,7 +41,7 @@ source gate additionally covers controls-first revision recovery, current-intent
 reread, retry/block reset with a nonzero lifetime allowance, and ordered obsolete
 automatic-intent retirement after provider and local commit. The 0.1.6
 installation/start verification passed with HTTP 200 and preserved MCP state.
-The bounded PM pilot is resuming; the prior 0.1.4 disposable evidence remains
+The bounded PM pilot was accepted on 0.1.6; the prior 0.1.4 disposable evidence remains
 the recorded four-assignment and interruption/recovery proof.
 
 The hidden Windows launcher keeps an enabled WSL service session available. It must not change global WSL idle settings, Windows power settings or unrelated startup tasks. Native Ubuntu uses the user service manager directly.
@@ -53,6 +53,9 @@ Native Windows workers, distributed scheduling, automatic migration of desktop w
 The qualified 0.1.6 source gate passed 425 tests with zero failures, six skips,
 100% configured coverage, format, specs, Credo, and Dialyzer. The 0.1.6 binary
 is built and its installation/start verification passed with HTTP 200 and
-preserved MCP state. The bounded PM pilot is resuming and has not been
-accepted. Public publication has not been performed. Track accepted evidence in release notes;
-do not infer release readiness from this compatibility table alone.
+preserved MCP state. The bounded PM pilot was accepted after source integration,
+CI, and live deployment verification. The versioned release notes record clean
+public Git installation and publication evidence. Usage telemetry can arrive
+after a result: the pilot managed snapshot was 55,740 tokens below the final
+worker session count. Allow for in-flight and late-reported usage; raw token
+counts that include cached input do not establish billed cost.
