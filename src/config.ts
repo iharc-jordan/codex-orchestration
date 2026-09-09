@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fromWslPath } from "./paths.js";
 
 export const DEFAULT_MAX_INPUT_BYTES = 16 * 1024;
 
@@ -81,7 +82,9 @@ export async function loadConfig(): Promise<BridgeConfig> {
     throw new ConfigError("config_input_limit_invalid", "max_input_bytes must be between 1024 and 16384");
   }
 
-  const tokenFile = isAbsolute(token) ? resolve(token) : resolve(dirname(path), token);
+  const tokenFile = platform() === "win32" && /^\/mnt\/[A-Za-z]\//.test(token)
+    ? fromWslPath(token)
+    : isAbsolute(token) ? resolve(token) : resolve(dirname(path), token);
   await verifyTokenFile(tokenFile);
   return { host, port: port as number, tokenFile, maxInputBytes: maxInputBytes as number };
 }

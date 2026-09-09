@@ -16742,7 +16742,26 @@ var StdioServerTransport = class {
 // src/config.ts
 import { readFile, stat } from "node:fs/promises";
 import { homedir, platform } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve as resolve2 } from "node:path";
+
+// src/paths.ts
+import { resolve, win32 } from "node:path";
+function toWslPath(input) {
+  const absolute = win32.resolve(input);
+  const match = /^([A-Za-z]):[\\/](.*)$/.exec(absolute);
+  if (!match) throw new Error("plugin path must be on a local Windows drive");
+  return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
+}
+function fromWslPath(input) {
+  const match = /^\/mnt\/([A-Za-z])\/(.*)$/.exec(input);
+  if (!match) throw new Error("WSL path must be on a local Windows drive");
+  return win32.resolve(`${match[1].toUpperCase()}:\\${match[2].replaceAll("/", "\\")}`);
+}
+function resolvedScriptPath(input) {
+  return toWslPath(input ?? resolve("mcp/server.mjs"));
+}
+
+// src/config.ts
 var DEFAULT_MAX_INPUT_BYTES = 16 * 1024;
 var ConfigError = class extends Error {
   code;
@@ -16754,7 +16773,7 @@ var ConfigError = class extends Error {
 };
 function configFilePath() {
   const explicit = process.env.CODEX_ORCHESTRATION_CONFIG;
-  if (explicit?.trim()) return resolve(explicit);
+  if (explicit?.trim()) return resolve2(explicit);
   const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
   return join(configHome, "codex-orchestration", "config.json");
 }
@@ -16796,7 +16815,7 @@ async function loadConfig() {
   if (!Number.isInteger(maxInputBytes) || maxInputBytes < 1024 || maxInputBytes > DEFAULT_MAX_INPUT_BYTES) {
     throw new ConfigError("config_input_limit_invalid", "max_input_bytes must be between 1024 and 16384");
   }
-  const tokenFile = isAbsolute(token) ? resolve(token) : resolve(dirname(path), token);
+  const tokenFile = platform() === "win32" && /^\/mnt\/[A-Za-z]\//.test(token) ? fromWslPath(token) : isAbsolute(token) ? resolve2(token) : resolve2(dirname(path), token);
   await verifyTokenFile(tokenFile);
   return { host, port, tokenFile, maxInputBytes };
 }
@@ -16959,18 +16978,6 @@ function asBridgeError(error2) {
   if (error2 instanceof BridgeError) return error2;
   if (error2 instanceof ConfigError) return new BridgeError(error2.code, error2.message);
   return new BridgeError("bridge_error", "The orchestration bridge could not complete the request");
-}
-
-// src/paths.ts
-import { resolve as resolve2, win32 } from "node:path";
-function toWslPath(input) {
-  const absolute = win32.resolve(input);
-  const match = /^([A-Za-z]):[\\/](.*)$/.exec(absolute);
-  if (!match) throw new Error("plugin path must be on a local Windows drive");
-  return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
-}
-function resolvedScriptPath(input) {
-  return toWslPath(input ?? resolve2("mcp/server.mjs"));
 }
 
 // src/server.ts

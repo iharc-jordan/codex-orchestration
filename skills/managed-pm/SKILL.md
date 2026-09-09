@@ -23,3 +23,13 @@ The default worker route is gpt-5.6-luna with xhigh effort. Luna max and Terra
 xhigh or max require a recorded reason. Do not recursively delegate workers.
 Pending results remain durable in the managed runtime. This bridge does not
 provide scheduler state, worker transcripts, sidebar visibility, or wakeups.
+
+Use the shipped lifecycle CLI for host ownership:
+`node ./mcp/cli.mjs setup --executable PATH --workflow PATH --version VERSION`,
+then `start`, `pause`, `resume`, `stop`, `upgrade --executable PATH`,
+`rollback`, or `uninstall`. `setup` installs owned service assets without
+enabling execution. `start` explicitly enables the service and then resumes
+through the managed API. `stop` records `pause` with `disable: true` before
+stopping; an unavailable API is a recovery error and does not count as a
+successful disarm. `uninstall` preserves the private configuration, journal,
+staged releases, and workspaces.

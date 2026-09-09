@@ -7,6 +7,12 @@ export function toWslPath(input: string): string {
   return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
 }
 
+export function fromWslPath(input: string): string {
+  const match = /^\/mnt\/([A-Za-z])\/(.*)$/.exec(input);
+  if (!match) throw new Error("WSL path must be on a local Windows drive");
+  return win32.resolve(`${match[1].toUpperCase()}:\\${match[2].replaceAll("/", "\\")}`);
+}
+
 export function resolvedScriptPath(input: string | undefined): string {
   return toWslPath(input ?? resolve("mcp/server.mjs"));
 }

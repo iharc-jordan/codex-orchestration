@@ -9,8 +9,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "npm run build:server && npm run build:cli",
+    "build": "npm run build:server && npm run build:cli-bundle && npm run build:cli",
     "build:server": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node20 --outfile=mcp/server.mjs",
+    "build:cli-bundle": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node20 --outfile=mcp/cli.mjs",
     "build:cli": "tsc --outDir dist",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
