@@ -36,7 +36,7 @@ curated marketplace requirement or assumed desktop-sidebar worker integration.
 | Required WSL toolchain and real worker proof | ACCEPTED | PM verified |
 | Additive github_projects tracker | ACCEPTED: 312 tests, full gate, both live reads; integrated d50dfaf | PM verified |
 | Generic hook context | ACCEPTED: 308 tests, full gate, integrated c3397b5 | PM verified |
-| Managed AppServer routes, resume and reports | R1 tested: 7526f12; independent review found final-turn budget classification defect, correction active | AppServer worker |
+| Managed AppServer routes, resume and reports | ACCEPTED R1: 7526f12 plus reviewed budget fixes 3ac2a7e/48310ed; integrated e9415bf | PM verified |
 | Managed process containment and permission proof | ACTIVE R2 | AppServer worker |
 | Managed journal/lifecycle/controls | ACTIVE: feature/managed-core from d50dfaf | projects worker |
 | Plugin MCP/client/skills | ACCEPTED R1: 63d6972; operation schemas follow core | PM verified |
