@@ -179,6 +179,12 @@ WSL and received the expected `config_missing` response before service setup.
 This establishes discovery and launch only. A configured service, managed
 controls, and clean public Git installation still require their own proof.
 
+A separate clean installation at `0c9a098` used only tracked files, a temporary
+Codex home, and a repository-root marketplace. The installed package contained
+neither `node_modules` nor Git metadata. Its bundled bridge listed all 11 MCP
+tools, answered diagnostics through WSL, and exited successfully on disconnect.
+Public Git fetching remains a later release check.
+
 Create the approved private IHARC Labs GitHub Project. A fresh Astra PM selects
 one bounded already-authorized delivery from existing IHARC work and uses the
 installed service. Preserve paused tasks and private data. Public release follows
