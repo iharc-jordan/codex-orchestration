@@ -26,6 +26,12 @@ inside revision `changes`. The service requires it for every route above
 Luna/xhigh. `assignment_id` is the Project item node ID; native issue identity
 is verified separately so duplicate memberships cannot create duplicate owners.
 
+`requirements_fingerprint` is `sha256:` followed by the lowercase SHA-256 digest
+of the exact UTF-8 GitHub issue body, with no title or whitespace normalization.
+Hash the body string from the authoritative API response rather than formatted
+shell output. `requirements_revision` is a PM-supplied material revision; it is
+not parsed from the issue text and is distinct from the assignment's revision.
+
 The same fixture is shipped as `elixir/test/fixtures/managed_control_fixture.json`
 in the pinned Symphony source. Its Elixir contract test applies the operation
 examples and route cases to the service rules; release validation compares the

@@ -16985,6 +16985,8 @@ var controlOperations = ["bind_project", "enroll", "revise", "pause", "resume", 
 var revisionProperty = { type: "integer", minimum: 0, description: "Current global or assignment revision required for compare-and-set." };
 var assignmentIdProperty = { type: "string", minLength: 1, description: "Project item node ID used as the assignment key; the service verifies underlying issue ownership separately." };
 var escalationReasonProperty = { type: "string", minLength: 1, description: "Required when selecting a route other than Luna/xhigh." };
+var requirementsFingerprintProperty = { type: "string", minLength: 1, description: "sha256: followed by the lowercase SHA-256 digest of the exact UTF-8 GitHub issue body. Exclude the title; preserve all whitespace and line endings." };
+var requirementsRevisionProperty = { type: "integer", minimum: 0, description: "Explicit PM material revision, distinct from the assignment revision; not parsed from issue text." };
 var routeProperty = {
   type: "object",
   properties: {
@@ -17032,8 +17034,8 @@ var operationArgSchemas = {
       dependencies: { type: "array", items: { type: "string" } },
       route: routeProperty,
       escalation_reason: escalationReasonProperty,
-      requirements_fingerprint: { type: "string", minLength: 1 },
-      requirements_revision: { type: "integer", minimum: 0 }
+      requirements_fingerprint: requirementsFingerprintProperty,
+      requirements_revision: requirementsRevisionProperty
     },
     required: ["expected_revision", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
     additionalProperties: true
@@ -17052,8 +17054,8 @@ var operationArgSchemas = {
           resources: { type: "array", items: { type: "string" } },
           dependencies: { type: "array", items: { type: "string" } },
           requirements: { type: "object" },
-          requirements_fingerprint: { type: "string", minLength: 1 },
-          requirements_revision: { type: "integer", minimum: 0 }
+          requirements_fingerprint: requirementsFingerprintProperty,
+          requirements_revision: requirementsRevisionProperty
         },
         additionalProperties: false
       }
