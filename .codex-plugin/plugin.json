@@ -1,6 +1,6 @@
 {
   "name": "codex-orchestration",
-  "version": "0.1.0+codex.20260909191000",
+  "version": "0.1.0",
   "description": "A portable MCP bridge for the local Symphony managed control plane.",
   "author": {
     "name": "Codex Orchestration contributors"

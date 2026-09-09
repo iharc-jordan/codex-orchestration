@@ -5,12 +5,17 @@ its host service. It does not install another Node, Codex, GitHub CLI, or
 scheduler.
 
 The first setup uses an explicit Symphony release executable and a private
-workflow file. During development, build the candidate from its pinned source.
+workflow file. Download the executable and `build-receipt.json` from the
+[pinned runtime release](https://github.com/iharc-jordan/symphony/releases/tag/v0.1.5)
+and compare its SHA256 with the receipt. On Linux, mark the downloaded file
+executable with `chmod +x symphony_linux_x86_64`. Windows users should place it
+in their Ubuntu WSL home and pass its Linux path to setup. Building from source
+is optional; see the [build instructions](release.md).
 Use the [generic workflow example](../fixtures/WORKFLOW.example.md) as a starting
 point and replace its paths and Project owner before setup:
 
 ```text
-node ./mcp/cli.mjs setup --executable /path/to/bin/symphony --workflow /path/to/WORKFLOW.md --version local-1 --port 8787
+node ./mcp/cli.mjs setup --executable /path/to/symphony_linux_x86_64 --workflow /path/to/WORKFLOW.md --version 0.1.5 --port 8787
 ```
 
 Setup creates separate XDG configuration, data, and state roots. Configuration
@@ -18,6 +23,10 @@ contains `config.json`, `token`, and the private `WORKFLOW.md`; state contains
 the managed lock, journal, logs, and workspaces; data contains staged releases
 and the current release pointer. Setup installs the owned service assets but
 does not enable or resume execution.
+
+Run these commands from the installed plugin directory (reported by
+`codex plugin add --json`) or a checkout of its pinned source. Setup stages an
+immutable release label; use a new label when upgrading to a changed executable.
 
 On Windows, setup delegates these Linux-owned roots and service operations to
 Ubuntu WSL. The installed bridge also runs its Linux Node process in Ubuntu, so
@@ -138,6 +147,11 @@ until the service workflow points at the new installed helper.
 
 ## Recovery and troubleshooting
 
+- If orchestration tools are missing from a desktop task, verify the plugin is
+  enabled with `codex plugin list`. A fresh native Codex App Server connection
+  discovered all 11 tools in validation, while an already running desktop client
+  omitted them after installation. Refresh the client when convenient; do not
+  reset service state or enroll a second assignment to address tool discovery.
 - `config_missing` means the bridge launched but cannot find its Linux
   configuration. Check the WSL home and any explicit configuration override.
 - An inactive service needs setup/start; an active service with no work may be

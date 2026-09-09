@@ -3,9 +3,9 @@
 A Codex plugin for an Astra PM working with a persistent pool of 5.6 workers,
 using OpenAI Symphony on Ubuntu and GitHub Projects for workflow state.
 
-**Development snapshot:** personal marketplace installation and actual MCP
-discovery have passed. Managed dispatch, process recovery, the real pilot, and
-public release validation are still in progress. See the
+**Development snapshot:** installed disposable assignments and real process
+recovery have passed. The bounded real pilot is paused for a runtime repair;
+public release validation remains pending. See the
 [delivery record](docs/implementation.md) for the current evidence boundary.
 
 ## How it works
@@ -26,7 +26,22 @@ concurrent workers. Windows uses Ubuntu WSL2 for execution; native Ubuntu is als
 a supported target. Work stops for PM review before acceptance unlocks dependent
 assignments.
 
-## Local installation
+## Installation
+
+The public v1 distribution uses the pinned GitHub marketplace:
+
+```shell
+codex plugin marketplace add iharc-jordan/codex-orchestration --ref v0.1.0
+codex plugin add codex-orchestration@codex-orchestration
+```
+
+Download `symphony_linux_x86_64` and its build receipt from the matching
+[Symphony release](https://github.com/iharc-jordan/symphony/releases/tag/v0.1.5).
+The executable includes Erlang and the application dependencies; existing
+Codex, GitHub CLI, Node, Git, and systemd are still required. Follow the
+[setup instructions](docs/usage.md) to configure the service before enabling it.
+
+### From a local checkout
 
 The repository includes a marketplace entry pointing to the plugin at its root.
 From a local checkout:
@@ -80,6 +95,6 @@ continuous-execution guarantees.
 - [Third-party notices for the bundled bridge](THIRD_PARTY_NOTICES.md)
 
 The plugin is licensed under [Apache-2.0](LICENSE). Symphony retains its upstream
-license and attribution. The runtime integration, executable, and reproducible
-release instructions will be published after the required installed workflow,
-recovery, and pilot validation passes.
+license and attribution. The
+[managed Symphony source](https://github.com/iharc-jordan/symphony/tree/orchestration/integration)
+and its release receipt identify the exact runtime used with this plugin.
