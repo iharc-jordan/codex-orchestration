@@ -112,6 +112,12 @@ location; it does not contain assignment state.
 | `managed.checkout_policy_file` | Private repository allowlist and workspace/control path policy. |
 | `managed.usage_limit_tokens` | Optional aggregate worker limit; further work stops when reported usage reaches it. |
 
+The validated Codex 0.153.4 managed profile disables worker network access.
+Prepare dependencies through a trusted `before_run` hook or a PM operation;
+GitHub access and checkout preparation run outside the worker turn. The named
+`symphony_worker` permission profile governs the turn, so changing only the
+legacy `turn_sandbox_policy.networkAccess` setting does not enable networking.
+
 Worker usage is measured from App Server telemetry. Updates can arrive late,
 and already running work can overshoot a cap. This limit does not include the
 PM's separate desktop usage. The journal preserves cumulative accounting and

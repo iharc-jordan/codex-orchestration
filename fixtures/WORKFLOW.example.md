@@ -22,7 +22,7 @@ codex:
   thread_sandbox: workspace-write
   turn_sandbox_policy:
     type: workspaceWrite
-    networkAccess: true
+    networkAccess: false
 managed:
   enabled: true
   journal_path: /home/example/.local/state/codex-orchestration/journal/managed.log
