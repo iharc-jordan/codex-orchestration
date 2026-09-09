@@ -39,7 +39,9 @@ curated marketplace requirement or assumed desktop-sidebar worker integration.
 | Managed AppServer routes, resume and reports | ACTIVE | AppServer worker |
 | Managed journal/lifecycle/controls | ACTIVE: feature/managed-core from d50dfaf | projects worker |
 | Plugin MCP/client/skills | ACCEPTED R1: 63d6972; operation schemas follow core | PM verified |
-| Service setup, launchers and release bundle | ACTIVE R2 | bridge worker |
+| Service setup and launchers | ACCEPTED R2: 08dabb8, Linux and Windows lifecycle fixtures | PM verified |
+| Release dependencies and executable | ACTIVE: separate downstream patch | bridge worker |
+| Personal marketplace installation/discovery | Installed 0.1.0; fresh-task MCP check ACTIVE | PM |
 | Installed disposable workflow and recovery | WAITING on implementation | PM |
 | Fresh IHARC PM pilot | WAITING on installed proof | PM |
 | Public source/release/upstream PRs | WAITING on pilot | PM |
@@ -160,6 +162,15 @@ Record targeted checks, exact revisions and unresolved gaps per component. Run
 upstream make all and plugin typecheck/test/build/manifest validation after
 integration. Prove actual installed MCP operation, a multi-repository dependency
 workflow, interruption/recovery, route enforcement and host/client separation.
+
+The service wrapper fixture at `08dabb8` passed setup/start/pause/resume/stop,
+upgrade/rollback, duplicate wrapper locking, and uninstall preservation checks.
+Windows verification used an installation path containing spaces and confirmed
+that a missing enabled marker prevents startup, the hidden standard-user task
+maintains the WSL session after the caller exits, and stop removes that keeper.
+The PM verified that owned test units/tasks were removed and the existing
+`Launch Codex` task remained unchanged. These fixtures used a test managed API;
+the actual Symphony recovery and installed workflow checks remain outstanding.
 
 Create the approved private IHARC Labs GitHub Project. A fresh Astra PM selects
 one bounded already-authorized delivery from existing IHARC work and uses the
