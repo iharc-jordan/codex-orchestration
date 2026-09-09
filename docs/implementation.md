@@ -166,3 +166,17 @@ one bounded already-authorized delivery from existing IHARC work and uses the
 installed service. Preserve paused tasks and private data. Public release follows
 acceptance, not merely worker completion; upstream PR submission is required,
 upstream merge is not.
+
+## Downstream patch register
+
+| Change | Reason | Compatibility and disposition |
+| --- | --- | --- |
+| `feature/github-projects` | Read exact Project membership, status and cross-repository issue dependencies. | Additive tracker; existing GitHub adapter stays unchanged. Submit separately upstream and replace with a verified upstream implementation when available. |
+| `feature/hook-context` | Supply bounded provider-neutral repository identity to trusted workspace hooks. | Existing hook commands remain valid. Submit separately upstream; remove downstream commits after the accepted upstream contract is verified. |
+| Managed AppServer routes and resume | Enforce worker routing, report scope, per-turn authorization and exact conversation recovery. | Opt-in managed behavior; preserve generic callers. Keep separate from tracker/hook PRs and propose independently reusable parts later. |
+| Managed journal, lifecycle and controls | Preserve execution ownership and reconcile external effects across interruption. | Opt-in extension; GitHub retains workflow authority and Symphony remains the scheduler. Retire individual additions only when upstream provides equivalent tested invariants. |
+| Release dependency updates | Address advisories reported by the dependency resolver for shipped packages. | Keep lockfile/runtime changes separate from focused upstream contributions. Pin validated versions and retain a working rollback release. |
+
+For every release, record exact integration and plugin revisions plus the tested
+runtime/dependency versions. Upstream merge alone does not remove a patch: verify
+the replacement against the affected managed and generic behavior first.
