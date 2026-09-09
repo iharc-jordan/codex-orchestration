@@ -76,10 +76,9 @@ test("disposable lifecycle installs, upgrades, rolls back, stops, and uninstalls
   t.after(async () => {
     if (installed && !uninstalled) {
       await wslCommand(["systemctl", "--user", "disable", "--now", `${service}.service`]);
-      await wslCommand(["systemctl", "--user", "unlink", `${root}/systemd/user/${service}.service`]);
     }
-    await wslCommand(["systemctl", "--user", "daemon-reload"]);
     await wslCommand(["rm", "-rf", root]);
+    await wslCommand(["systemctl", "--user", "daemon-reload"]);
   });
 
   const setup = JSON.parse((await runCli(node, ["setup", ...options, "--executable", fake, "--workflow", "/etc/hosts", "--version", "r1", "--port", "18991"])).stdout);
@@ -89,6 +88,7 @@ test("disposable lifecycle installs, upgrades, rolls back, stops, and uninstalls
   assert.match(unit.stdout, /flock|KillMode=control-group/);
   const wrapper = await wslCommand(["cat", setup.wrapper]);
   assert.match(wrapper.stdout, /--nonblock/);
+  assert.match(wrapper.stdout, /--managed/);
   const diagnostic = JSON.parse((await runCli(node, ["diagnostics", ...options])).stdout);
   assert.equal(diagnostic.service.enabled, false);
   assert.equal(diagnostic.release.endsWith("/r1/symphony"), true);

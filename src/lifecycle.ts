@@ -204,7 +204,7 @@ function serviceInvocation(paths: LifecyclePaths, port: number): string {
     "set -eu",
     `release=${release}`,
     '[ -n "$release" ] || { echo "current release is empty" >&2; exit 78; }',
-    `exec /usr/bin/flock --nonblock ${quoteShell(servicePath(paths.lock))} "$release" --i-understand-that-this-will-be-running-without-the-usual-guardrails --logs-root ${quoteShell(servicePath(paths.logsRoot))} --port ${port} ${quoteShell(servicePath(paths.workflow))}`,
+    `exec /usr/bin/flock --nonblock ${quoteShell(servicePath(paths.lock))} "$release" --managed --i-understand-that-this-will-be-running-without-the-usual-guardrails --logs-root ${quoteShell(servicePath(paths.logsRoot))} --port ${port} ${quoteShell(servicePath(paths.workflow))}`,
     ""
   ].join("\n");
 }
@@ -237,6 +237,7 @@ function windowsLauncher(paths: LifecyclePaths): string {
   const powershellQuote = (input: string): string => `'${input.replaceAll("'", "''")}'`;
   return [
     "$ErrorActionPreference = 'Stop'",
+    `if (-not (Test-Path -LiteralPath ${powershellQuote(paths.enabledMarker)})) { exit 0 }`,
     `wsl.exe -d Ubuntu -- systemctl --user start ${powershellQuote(service)}`,
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
     `wsl.exe -d Ubuntu -- bash -lc ${powershellQuote(waitScript)}`,
