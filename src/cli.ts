@@ -1,6 +1,5 @@
-import { validateConfig } from "./config.js";
 import { CheckoutError, prepareTrustedCheckout, type CheckoutOptions } from "./checkout.js";
-import { LifecycleError, diagnostics, pause, rollback, resume, setup, start, stop, uninstall, upgrade, type LifecycleOptions } from "./lifecycle.js";
+import { LifecycleError, diagnostics, pause, rollback, resume, setup, start, stop, uninstall, upgrade, validateConfigForHost, type LifecycleOptions } from "./lifecycle.js";
 
 const usage = `Usage:
   codex-orchestration validate-config
@@ -58,7 +57,7 @@ function print(value: unknown): void {
 try {
   const [command = "help", ...args] = process.argv.slice(2);
   if (command === "validate-config") {
-    const diagnostic = await validateConfig();
+    const diagnostic = await validateConfigForHost();
     print(diagnostic);
     process.exitCode = diagnostic.valid ? 0 : 1;
   } else if (command === "help") {

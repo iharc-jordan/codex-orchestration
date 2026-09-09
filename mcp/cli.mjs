@@ -14,12 +14,16 @@ var __export = (target, all) => {
 };
 
 // src/paths.ts
-import { resolve, win32 } from "node:path";
+import { resolve as resolve2, win32 } from "node:path";
 function toWslPath(input) {
   const absolute = win32.resolve(input);
   const match = /^([A-Za-z]):[\\/](.*)$/.exec(absolute);
   if (!match) throw new Error("plugin path must be on a local Windows drive");
   return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
+}
+function toWslServicePath(input) {
+  if (input.startsWith("/")) return input;
+  return toWslPath(input);
 }
 function fromWslPath(input) {
   const match = /^\/mnt\/([A-Za-z])\/(.*)$/.exec(input);
@@ -42,12 +46,12 @@ __export(config_exports, {
   readToken: () => readToken,
   validateConfig: () => validateConfig
 });
-import { readFile, stat } from "node:fs/promises";
+import { readFile as readFile2, stat } from "node:fs/promises";
 import { homedir, platform } from "node:os";
-import { dirname, isAbsolute, join, resolve as resolve2 } from "node:path";
+import { dirname as dirname2, isAbsolute as isAbsolute2, join, resolve as resolve3 } from "node:path";
 function configFilePath() {
   const explicit = process.env.CODEX_ORCHESTRATION_CONFIG;
-  if (explicit?.trim()) return resolve2(explicit);
+  if (explicit?.trim()) return resolve3(explicit);
   const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
   return join(configHome, "codex-orchestration", "config.json");
 }
@@ -62,7 +66,7 @@ async function loadConfig() {
   const path = configFilePath();
   let value;
   try {
-    value = JSON.parse(await readFile(path, "utf8"));
+    value = JSON.parse(await readFile2(path, "utf8"));
   } catch (error) {
     if (error.code === "ENOENT") {
       throw new ConfigError("config_missing", `Configuration file not found: ${path}`);
@@ -89,7 +93,7 @@ async function loadConfig() {
   if (!Number.isInteger(maxInputBytes) || maxInputBytes < 1024 || maxInputBytes > DEFAULT_MAX_INPUT_BYTES) {
     throw new ConfigError("config_input_limit_invalid", "max_input_bytes must be between 1024 and 16384");
   }
-  const tokenFile = platform() === "win32" && /^\/mnt\/[A-Za-z]\//.test(token) ? fromWslPath(token) : isAbsolute(token) ? resolve2(token) : resolve2(dirname(path), token);
+  const tokenFile = platform() === "win32" && /^\/mnt\/[A-Za-z]\//.test(token) ? fromWslPath(token) : isAbsolute2(token) ? resolve3(token) : resolve3(dirname2(path), token);
   await verifyTokenFile(tokenFile);
   return { host, port, tokenFile, maxInputBytes };
 }
@@ -110,7 +114,7 @@ async function verifyTokenFile(tokenFile) {
 }
 async function readToken(config) {
   try {
-    const token = (await readFile(config.tokenFile, "utf8")).trim();
+    const token = (await readFile2(config.tokenFile, "utf8")).trim();
     if (!token) throw new ConfigError("config_token_empty", "token_file is empty");
     return token;
   } catch (error) {
@@ -145,13 +149,10 @@ var init_config = __esm({
   }
 });
 
-// src/cli.ts
-init_config();
-
 // src/checkout.ts
 import { execFile as nodeExecFile } from "node:child_process";
-import { lstat, mkdir, readFile as readFile2, readdir, realpath, rm } from "node:fs/promises";
-import { basename, dirname as dirname2, isAbsolute as isAbsolute2, relative, resolve as resolve3, sep } from "node:path";
+import { lstat, mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 var execFile = promisify(nodeExecFile);
 var CONTEXT_MAX_BYTES = 16 * 1024;
@@ -208,7 +209,7 @@ function readIssueContext(raw = process.env.SYMPHONY_ISSUE_CONTEXT) {
 async function readJsonFile(path, maxBytes, code) {
   let contents;
   try {
-    contents = await readFile2(path);
+    contents = await readFile(path);
   } catch {
     invalid(`${code}_unreadable`, "checkout input could not be read");
   }
@@ -250,7 +251,7 @@ function parseRemote(value) {
   return { remote };
 }
 function parsePolicy(value) {
-  if (!plainObject(value) || typeof value.workspace_root !== "string" || !isAbsolute2(value.workspace_root) || typeof value.control_root !== "string" || !isAbsolute2(value.control_root) || !plainObject(value.repositories)) {
+  if (!plainObject(value) || typeof value.workspace_root !== "string" || !isAbsolute(value.workspace_root) || typeof value.control_root !== "string" || !isAbsolute(value.control_root) || !plainObject(value.repositories)) {
     invalid("policy_invalid", "checkout policy must include absolute control_root, workspace_root, and repositories");
   }
   const repositories = {};
@@ -263,17 +264,17 @@ function parsePolicy(value) {
 }
 function inside(root, target) {
   const path = relative(root, target);
-  return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute2(path);
+  return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
 }
 async function resolveWorkspace(rootInput, workspaceInput) {
-  if (!isAbsolute2(workspaceInput) || workspaceInput.includes("\0")) invalid("workspace_invalid", "workspace must be an absolute path");
+  if (!isAbsolute(workspaceInput) || workspaceInput.includes("\0")) invalid("workspace_invalid", "workspace must be an absolute path");
   let root;
   try {
     root = await realpath(rootInput);
   } catch {
     invalid("workspace_root_invalid", "checkout workspace_root does not exist");
   }
-  const rawWorkspace = resolve3(workspaceInput);
+  const rawWorkspace = resolve(workspaceInput);
   let workspace;
   let exists;
   try {
@@ -286,16 +287,16 @@ async function resolveWorkspace(rootInput, workspaceInput) {
     if (error.code !== "ENOENT") throw error;
     let parent;
     try {
-      parent = await realpath(dirname2(rawWorkspace));
+      parent = await realpath(dirname(rawWorkspace));
     } catch {
       invalid("workspace_invalid", "workspace parent does not exist");
     }
-    workspace = resolve3(parent, basename(rawWorkspace));
+    workspace = resolve(parent, basename(rawWorkspace));
     exists = false;
   }
   if (!inside(root, workspace)) invalid("workspace_outside_root", "workspace is outside the trusted workspace_root");
   if (!exists) {
-    const parent = dirname2(workspace);
+    const parent = dirname(workspace);
     if (!inside(root, parent) && parent !== root) invalid("workspace_outside_root", "workspace parent is outside the trusted workspace_root");
   }
   return { root, workspace, exists };
@@ -323,8 +324,8 @@ async function prepareExisting(workspace, remote) {
     return true;
   }
   if (await git(["rev-parse", "--is-inside-work-tree"], workspace) !== "true") invalid("workspace_invalid", "workspace is not a Git worktree");
-  const top = resolve3(await git(["rev-parse", "--show-toplevel"], workspace));
-  if (top !== resolve3(workspace)) invalid("workspace_invalid", "workspace is not the checkout root");
+  const top = resolve(await git(["rev-parse", "--show-toplevel"], workspace));
+  if (top !== resolve(workspace)) invalid("workspace_invalid", "workspace is not the checkout root");
   const actualRemote = await git(["remote", "get-url", "origin"], workspace);
   if (!sameRemote(actualRemote, remote)) invalid("repository_mismatch", "workspace origin does not match the enrolled repository");
   return false;
@@ -339,10 +340,10 @@ async function validateInputLocation(inputFile, policy, workspaceRoot) {
   let inputParent;
   try {
     controlRoot = await realpath(policy.control_root);
-    inputPath = resolve3(inputFile);
+    inputPath = resolve(inputFile);
     const details = await lstat(inputPath);
     if (details.isSymbolicLink() || !details.isFile()) invalid("input_location_invalid", "checkout input must be a regular file");
-    inputParent = await realpath(dirname2(inputPath));
+    inputParent = await realpath(dirname(inputPath));
   } catch {
     invalid("input_location_invalid", "checkout input location could not be inspected");
   }
@@ -374,7 +375,7 @@ async function prepareTrustedCheckout(options) {
     if (workspace.exists) {
       cloned = await prepareExisting(workspace.workspace, configured.remote);
     } else {
-      await mkdir(dirname2(workspace.workspace), { recursive: true });
+      await mkdir(dirname(workspace.workspace), { recursive: true });
       await git(["clone", "--no-checkout", "--origin", "origin", configured.remote, workspace.workspace]);
       cloned = true;
     }
@@ -535,6 +536,7 @@ var ManagedClient = class _ManagedClient {
 };
 
 // src/lifecycle.ts
+init_config();
 init_paths();
 var execFile2 = promisify2(nodeExecFile2);
 var SERVICE_NAME_PATTERN = /^[A-Za-z0-9_.@-]{1,80}$/;
@@ -597,7 +599,7 @@ function hostPath(input) {
   return win322.resolve(`${match[1].toUpperCase()}:\\${match[2].replaceAll("/", "\\")}`);
 }
 function servicePath(input) {
-  return platform2() === "win32" ? toWslPath(input) : input;
+  return platform2() === "win32" ? toWslServicePath(input) : input;
 }
 function applyOptions(options) {
   if (options.root) process.env.CODEX_ORCHESTRATION_HOME = options.root;
@@ -630,6 +632,97 @@ async function run(command, args, allowFailure = false, hostCommand = false) {
 }
 async function runHost(command, args, allowFailure = false) {
   return run(command, args, allowFailure, true);
+}
+function wslOptionPath(value) {
+  return /^[A-Za-z]:[\\/]/.test(value) ? toWslPath(value) : value;
+}
+function delegatedOptionArgs(options) {
+  const args = [];
+  const values = [
+    ["--executable", options.executable, true],
+    ["--workflow", options.workflow, true],
+    ["--version", options.version, false],
+    ["--host", options.host, false],
+    ["--port", options.port === void 0 ? void 0 : String(options.port), false],
+    ["--token-file", options.tokenFile, true],
+    ["--root", options.root, true],
+    ["--service-name", options.serviceName, false]
+  ];
+  for (const [name, value, path] of values) {
+    if (value === void 0) continue;
+    args.push(name, path ? wslOptionPath(value) : value);
+  }
+  return args;
+}
+async function resolveWslNode() {
+  const result = await runHost("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lic", "node -p process.execPath"], true);
+  if (result.code !== 0) throw new LifecycleError("wsl_node_missing", "could not resolve a Linux Node runtime in Ubuntu WSL");
+  const candidate = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^\/(?!mnt\/)[^\r\n]+\/node$/.test(line)).pop();
+  if (!candidate) throw new LifecycleError("wsl_node_missing", "Ubuntu WSL did not return a Linux Node runtime");
+  return candidate;
+}
+async function runWslCli(command, options = {}) {
+  const scriptInput = process.argv[1] || resolve4("mcp/cli.mjs");
+  const script = scriptInput.startsWith("/") ? scriptInput : wslOptionPath(resolve4(scriptInput));
+  const node = await resolveWslNode();
+  const unset = [
+    "CODEX_ORCHESTRATION_CONFIG",
+    "CODEX_ORCHESTRATION_HOME",
+    "CODEX_ORCHESTRATION_SERVICE_NAME",
+    "CODEX_ORCHESTRATION_TASK_NAME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME"
+  ];
+  const environment = ["env", ...unset.flatMap((name) => ["-u", name])];
+  const inherited = /* @__PURE__ */ new Map([
+    ["CODEX_ORCHESTRATION_HOME", options.root || process.env.CODEX_ORCHESTRATION_HOME],
+    ["CODEX_ORCHESTRATION_CONFIG", process.env.CODEX_ORCHESTRATION_CONFIG],
+    ["CODEX_ORCHESTRATION_SERVICE_NAME", options.serviceName || process.env.CODEX_ORCHESTRATION_SERVICE_NAME],
+    ["XDG_CONFIG_HOME", process.env.XDG_CONFIG_HOME],
+    ["XDG_DATA_HOME", process.env.XDG_DATA_HOME],
+    ["XDG_STATE_HOME", process.env.XDG_STATE_HOME]
+  ]);
+  for (const [name, value] of inherited) {
+    if (value) environment.push(`${name}=${name.startsWith("XDG_") || name.endsWith("_HOME") || name.endsWith("_CONFIG") ? wslOptionPath(value) : value}`);
+  }
+  const result = await runHost("wsl.exe", ["-d", "Ubuntu", "--", ...environment, node, script, command, ...delegatedOptionArgs(options)], true);
+  try {
+    const value = JSON.parse(result.stdout);
+    if (result.code !== 0 && command !== "validate-config") {
+      const output = `${result.stderr}
+${result.stdout}`.trim();
+      throw new LifecycleError("delegated_failed", output.slice(0, 500) || `WSL ${command} failed`);
+    }
+    return value;
+  } catch {
+    if (result.code !== 0) {
+      const output = `${result.stderr}
+${result.stdout}`.trim();
+      throw new LifecycleError("delegated_failed", output.slice(0, 500) || `WSL ${command} failed`);
+    }
+    throw new LifecycleError("delegated_invalid", `WSL ${command} returned invalid lifecycle JSON`);
+  }
+}
+function windowsKeeperPaths(linuxPaths) {
+  const home = process.env.USERPROFILE || homedir2();
+  const configuredData = process.env.XDG_DATA_HOME?.trim();
+  const dataBase = configuredData && /^[A-Za-z]:[\\/]/.test(configuredData) ? configuredData : join2(home, ".local", "share");
+  const root = join2(dataBase, "codex-orchestration");
+  return {
+    ...linuxPaths,
+    launcher: join2(root, "bin", "windows-launcher.ps1"),
+    taskXml: join2(root, "bin", "windows-task.xml"),
+    metadata: join2(root, "installation.json"),
+    taskName: `Codex-Orchestration-${randomBytes(4).toString("hex")}`
+  };
+}
+async function writeLinuxMarker(path) {
+  await run("mkdir", ["-p", dirname3(path)]);
+  await run("sh", ["-lc", `umask 077; printf '%s\\n' enabled > ${quoteShell(path)}`]);
+}
+async function removeLinuxMarker(path) {
+  await run("rm", ["-f", path], true);
 }
 async function ensureDirectory(path) {
   await mkdir2(path, { recursive: true });
@@ -891,8 +984,20 @@ async function managedControl(paths, operation, disable) {
   if (!state || !Number.isInteger(state.revision)) throw new LifecycleError("state_invalid", "managed state did not include a current revision");
   return client.control({ request_id: requestId(operation), operation, args: { expected_revision: state.revision, disable } });
 }
+async function setupWindows(options) {
+  const linuxPaths = await runWslCli("setup", options);
+  const paths = windowsKeeperPaths(linuxPaths);
+  await applyStoredTaskName(paths);
+  const ownership = await taskOwnership(paths);
+  if (ownership === "foreign") throw new LifecycleError("task_owned_elsewhere", `scheduled task already exists and is not owned by this installation: ${paths.taskName}`);
+  await installWindowsTask(paths);
+  await writeAtomic(paths.metadata, `${JSON.stringify({ serviceName: paths.serviceName, taskName: paths.taskName, installedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2)}
+`);
+  return paths;
+}
 async function setup(options = {}) {
   applyOptions(options);
+  if (platform2() === "win32") return setupWindows(options);
   const paths = lifecyclePaths(process.env, platform2());
   for (const path of [paths.configRoot, paths.dataRoot, paths.stateRoot, paths.releasesRoot, paths.logsRoot, paths.journalRoot, paths.workspacesRoot, dirname3(paths.unit), dirname3(paths.wrapper)]) await ensureDirectory(path);
   if (options.workflow) {
@@ -921,8 +1026,13 @@ async function setup(options = {}) {
 `);
   return paths;
 }
+async function validateConfigForHost() {
+  if (platform2() === "win32") return await runWslCli("validate-config");
+  return validateConfig();
+}
 async function diagnostics(options = {}) {
   applyOptions(options);
+  if (platform2() === "win32") return await runWslCli("diagnostics", options);
   const paths = lifecyclePaths(process.env, platform2());
   await applyStoredTaskName(paths);
   await ensureConfigEnv(paths);
@@ -939,6 +1049,15 @@ async function diagnostics(options = {}) {
 }
 async function start(options = {}) {
   applyOptions(options);
+  if (platform2() === "win32") {
+    const paths2 = await setupWindows(options);
+    await run("systemctl", ["--user", "enable", "--now", paths2.serviceName]);
+    await writeLinuxMarker(paths2.enabledMarker);
+    await runHost("schtasks.exe", ["/Change", "/TN", paths2.taskName, "/ENABLE"]);
+    await runHost("schtasks.exe", ["/Run", "/TN", paths2.taskName]);
+    await runWslCli("resume", options);
+    return paths2;
+  }
   const paths = await setup(options);
   await run("systemctl", ["--user", "enable", "--now", paths.serviceName]);
   if (platform2() === "win32") {
@@ -951,18 +1070,30 @@ async function start(options = {}) {
 }
 async function pause(options = {}) {
   applyOptions(options);
+  if (platform2() === "win32") return runWslCli("pause", options);
   const paths = lifecyclePaths(process.env, platform2());
   await applyStoredTaskName(paths);
   return managedControl(paths, "pause", false);
 }
 async function resume(options = {}) {
   applyOptions(options);
+  if (platform2() === "win32") return runWslCli("resume", options);
   const paths = lifecyclePaths(process.env, platform2());
   await applyStoredTaskName(paths);
   return managedControl(paths, "resume", false);
 }
 async function stop(options = {}) {
   applyOptions(options);
+  if (platform2() === "win32") {
+    const probe = windowsKeeperPaths(lifecyclePaths(process.env, platform2()));
+    await applyStoredTaskName(probe);
+    const result = await runWslCli("stop", options);
+    await removeLinuxMarker(result.enabledMarker);
+    const paths2 = windowsKeeperPaths(result);
+    paths2.taskName = probe.taskName;
+    await runHost("schtasks.exe", ["/Change", "/TN", paths2.taskName, "/DISABLE"], true);
+    return paths2;
+  }
   const paths = lifecyclePaths(process.env, platform2());
   await applyStoredTaskName(paths);
   await managedControl(paths, "pause", true);
@@ -974,6 +1105,7 @@ async function stop(options = {}) {
 async function upgrade(options) {
   if (!options.executable) throw new LifecycleError("executable_required", "upgrade requires --executable");
   applyOptions(options);
+  if (platform2() === "win32") return await runWslCli("upgrade", options);
   const paths = lifecyclePaths(process.env, platform2());
   await applyStoredTaskName(paths);
   const version = validateVersion(options.version);
@@ -985,6 +1117,7 @@ async function upgrade(options) {
 }
 async function rollback(options = {}) {
   applyOptions(options);
+  if (platform2() === "win32") return await runWslCli("rollback", options);
   const paths = lifecyclePaths(process.env, platform2());
   await applyStoredTaskName(paths);
   const previous = await readOptional(paths.previousRelease);
@@ -1001,6 +1134,17 @@ async function rollback(options = {}) {
 }
 async function uninstall(options = {}) {
   applyOptions(options);
+  if (platform2() === "win32") {
+    const probe = windowsKeeperPaths(lifecyclePaths(process.env, platform2()));
+    await applyStoredTaskName(probe);
+    const task2 = await taskOwnership(probe);
+    if (task2 === "foreign") throw new LifecycleError("task_owned_elsewhere", `scheduled task already exists and is not owned by this installation: ${probe.taskName}`);
+    const result = await runWslCli("uninstall", options);
+    await removeLinuxMarker(result.enabledMarker);
+    if (task2 === "owned") await runHost("schtasks.exe", ["/Delete", "/TN", probe.taskName, "/F"], true);
+    for (const path of [probe.launcher, probe.taskXml, probe.metadata]) await rm2(path, { force: true });
+    return { ...result, launcher: probe.launcher, taskXml: probe.taskXml, metadata: probe.metadata, taskName: probe.taskName };
+  }
   const paths = lifecyclePaths(process.env, platform2());
   await applyStoredTaskName(paths);
   const unit = await unitOwnership(paths);
@@ -1077,7 +1221,7 @@ function print(value) {
 try {
   const [command = "help", ...args] = process.argv.slice(2);
   if (command === "validate-config") {
-    const diagnostic = await validateConfig();
+    const diagnostic = await validateConfigForHost();
     print(diagnostic);
     process.exitCode = diagnostic.valid ? 0 : 1;
   } else if (command === "help") {

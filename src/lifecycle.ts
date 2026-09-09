@@ -6,7 +6,8 @@ import { homedir, platform } from "node:os";
 import { dirname, join, resolve, win32 } from "node:path";
 import { randomBytes } from "node:crypto";
 import { BridgeError, ManagedClient, type ManagedState } from "./client.js";
-import { toWslPath } from "./paths.js";
+import { validateConfig, type ConfigDiagnostic } from "./config.js";
+import { toWslPath, toWslServicePath } from "./paths.js";
 
 const execFile = promisify(nodeExecFile);
 const SERVICE_NAME_PATTERN = /^[A-Za-z0-9_.@-]{1,80}$/;
@@ -115,7 +116,7 @@ function hostPath(input: string): string {
 }
 
 function servicePath(input: string): string {
-  return platform() === "win32" ? toWslPath(input) : input;
+  return platform() === "win32" ? toWslServicePath(input) : input;
 }
 
 function applyOptions(options: LifecycleOptions): void {
@@ -154,6 +155,102 @@ async function run(command: string, args: string[], allowFailure = false, hostCo
 
 async function runHost(command: string, args: string[], allowFailure = false): Promise<CommandResult> {
   return run(command, args, allowFailure, true);
+}
+
+function wslOptionPath(value: string): string {
+  return /^[A-Za-z]:[\\/]/.test(value) ? toWslPath(value) : value;
+}
+
+function delegatedOptionArgs(options: LifecycleOptions): string[] {
+  const args: string[] = [];
+  const values: Array<[string, string | undefined, boolean]> = [
+    ["--executable", options.executable, true],
+    ["--workflow", options.workflow, true],
+    ["--version", options.version, false],
+    ["--host", options.host, false],
+    ["--port", options.port === undefined ? undefined : String(options.port), false],
+    ["--token-file", options.tokenFile, true],
+    ["--root", options.root, true],
+    ["--service-name", options.serviceName, false]
+  ];
+  for (const [name, value, path] of values) {
+    if (value === undefined) continue;
+    args.push(name, path ? wslOptionPath(value) : value);
+  }
+  return args;
+}
+
+async function resolveWslNode(): Promise<string> {
+  const result = await runHost("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lic", "node -p process.execPath"], true);
+  if (result.code !== 0) throw new LifecycleError("wsl_node_missing", "could not resolve a Linux Node runtime in Ubuntu WSL");
+  const candidate = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^\/(?!mnt\/)[^\r\n]+\/node$/.test(line)).pop();
+  if (!candidate) throw new LifecycleError("wsl_node_missing", "Ubuntu WSL did not return a Linux Node runtime");
+  return candidate;
+}
+
+async function runWslCli(command: string, options: LifecycleOptions = {}): Promise<unknown> {
+  const scriptInput = process.argv[1] || resolve("mcp/cli.mjs");
+  const script = scriptInput.startsWith("/") ? scriptInput : wslOptionPath(resolve(scriptInput));
+  const node = await resolveWslNode();
+  const unset = [
+    "CODEX_ORCHESTRATION_CONFIG",
+    "CODEX_ORCHESTRATION_HOME",
+    "CODEX_ORCHESTRATION_SERVICE_NAME",
+    "CODEX_ORCHESTRATION_TASK_NAME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME"
+  ];
+  const environment = ["env", ...unset.flatMap((name) => ["-u", name])];
+  const inherited = new Map<string, string | undefined>([
+    ["CODEX_ORCHESTRATION_HOME", options.root || process.env.CODEX_ORCHESTRATION_HOME],
+    ["CODEX_ORCHESTRATION_CONFIG", process.env.CODEX_ORCHESTRATION_CONFIG],
+    ["CODEX_ORCHESTRATION_SERVICE_NAME", options.serviceName || process.env.CODEX_ORCHESTRATION_SERVICE_NAME],
+    ["XDG_CONFIG_HOME", process.env.XDG_CONFIG_HOME],
+    ["XDG_DATA_HOME", process.env.XDG_DATA_HOME],
+    ["XDG_STATE_HOME", process.env.XDG_STATE_HOME]
+  ]);
+  for (const [name, value] of inherited) {
+    if (value) environment.push(`${name}=${name.startsWith("XDG_") || name.endsWith("_HOME") || name.endsWith("_CONFIG") ? wslOptionPath(value) : value}`);
+  }
+  const result = await runHost("wsl.exe", ["-d", "Ubuntu", "--", ...environment, node, script, command, ...delegatedOptionArgs(options)], true);
+  try {
+    const value = JSON.parse(result.stdout);
+    if (result.code !== 0 && command !== "validate-config") {
+      const output = `${result.stderr}\n${result.stdout}`.trim();
+      throw new LifecycleError("delegated_failed", output.slice(0, 500) || `WSL ${command} failed`);
+    }
+    return value;
+  } catch {
+    if (result.code !== 0) {
+      const output = `${result.stderr}\n${result.stdout}`.trim();
+      throw new LifecycleError("delegated_failed", output.slice(0, 500) || `WSL ${command} failed`);
+    }
+    throw new LifecycleError("delegated_invalid", `WSL ${command} returned invalid lifecycle JSON`);
+  }
+}
+
+function windowsKeeperPaths(linuxPaths: LifecyclePaths): LifecyclePaths {
+  const home = process.env.USERPROFILE || homedir();
+  const configuredData = process.env.XDG_DATA_HOME?.trim();
+  const dataBase = configuredData && /^[A-Za-z]:[\\/]/.test(configuredData) ? configuredData : join(home, ".local", "share");
+  const root = join(dataBase, "codex-orchestration");
+  return {
+    ...linuxPaths,
+    launcher: join(root, "bin", "windows-launcher.ps1"),
+    taskXml: join(root, "bin", "windows-task.xml"),
+    metadata: join(root, "installation.json"),
+    taskName: `Codex-Orchestration-${randomBytes(4).toString("hex")}`
+  };
+}
+
+async function writeLinuxMarker(path: string): Promise<void> {
+  await run("mkdir", ["-p", dirname(path)]);
+  await run("sh", ["-lc", `umask 077; printf '%s\\n' enabled > ${quoteShell(path)}`]);
+}
+
+async function removeLinuxMarker(path: string): Promise<void> {
+  await run("rm", ["-f", path], true);
 }
 
 async function ensureDirectory(path: string): Promise<void> {
@@ -445,8 +542,20 @@ async function managedControl(paths: LifecyclePaths, operation: "pause" | "resum
   return client.control({ request_id: requestId(operation), operation, args: { expected_revision: state.revision, disable } });
 }
 
+async function setupWindows(options: LifecycleOptions): Promise<LifecyclePaths> {
+  const linuxPaths = await runWslCli("setup", options) as LifecyclePaths;
+  const paths = windowsKeeperPaths(linuxPaths);
+  await applyStoredTaskName(paths);
+  const ownership = await taskOwnership(paths);
+  if (ownership === "foreign") throw new LifecycleError("task_owned_elsewhere", `scheduled task already exists and is not owned by this installation: ${paths.taskName}`);
+  await installWindowsTask(paths);
+  await writeAtomic(paths.metadata, `${JSON.stringify({ serviceName: paths.serviceName, taskName: paths.taskName, installedAt: new Date().toISOString() }, null, 2)}\n`);
+  return paths;
+}
+
 export async function setup(options: LifecycleOptions = {}): Promise<LifecyclePaths> {
   applyOptions(options);
+  if (platform() === "win32") return setupWindows(options);
   const paths = lifecyclePaths(process.env, platform());
   for (const path of [paths.configRoot, paths.dataRoot, paths.stateRoot, paths.releasesRoot, paths.logsRoot, paths.journalRoot, paths.workspacesRoot, dirname(paths.unit), dirname(paths.wrapper)]) await ensureDirectory(path);
   if (options.workflow) {
@@ -475,8 +584,14 @@ export async function setup(options: LifecycleOptions = {}): Promise<LifecyclePa
   return paths;
 }
 
+export async function validateConfigForHost(): Promise<ConfigDiagnostic> {
+  if (platform() === "win32") return await runWslCli("validate-config") as ConfigDiagnostic;
+  return validateConfig();
+}
+
 export async function diagnostics(options: LifecycleOptions = {}): Promise<Record<string, unknown>> {
   applyOptions(options);
+  if (platform() === "win32") return await runWslCli("diagnostics", options) as Record<string, unknown>;
   const paths = lifecyclePaths(process.env, platform());
   await applyStoredTaskName(paths);
   await ensureConfigEnv(paths);
@@ -494,6 +609,15 @@ export async function diagnostics(options: LifecycleOptions = {}): Promise<Recor
 
 export async function start(options: LifecycleOptions = {}): Promise<LifecyclePaths> {
   applyOptions(options);
+  if (platform() === "win32") {
+    const paths = await setupWindows(options);
+    await run("systemctl", ["--user", "enable", "--now", paths.serviceName]);
+    await writeLinuxMarker(paths.enabledMarker);
+    await runHost("schtasks.exe", ["/Change", "/TN", paths.taskName, "/ENABLE"]);
+    await runHost("schtasks.exe", ["/Run", "/TN", paths.taskName]);
+    await runWslCli("resume", options);
+    return paths;
+  }
   const paths = await setup(options);
   await run("systemctl", ["--user", "enable", "--now", paths.serviceName]);
   if (platform() === "win32") {
@@ -507,6 +631,7 @@ export async function start(options: LifecycleOptions = {}): Promise<LifecyclePa
 
 export async function pause(options: LifecycleOptions = {}): Promise<unknown> {
   applyOptions(options);
+  if (platform() === "win32") return runWslCli("pause", options);
   const paths = lifecyclePaths(process.env, platform());
   await applyStoredTaskName(paths);
   return managedControl(paths, "pause", false);
@@ -514,6 +639,7 @@ export async function pause(options: LifecycleOptions = {}): Promise<unknown> {
 
 export async function resume(options: LifecycleOptions = {}): Promise<unknown> {
   applyOptions(options);
+  if (platform() === "win32") return runWslCli("resume", options);
   const paths = lifecyclePaths(process.env, platform());
   await applyStoredTaskName(paths);
   return managedControl(paths, "resume", false);
@@ -521,6 +647,16 @@ export async function resume(options: LifecycleOptions = {}): Promise<unknown> {
 
 export async function stop(options: LifecycleOptions = {}): Promise<LifecyclePaths> {
   applyOptions(options);
+  if (platform() === "win32") {
+    const probe = windowsKeeperPaths(lifecyclePaths(process.env, platform()));
+    await applyStoredTaskName(probe);
+    const result = await runWslCli("stop", options) as LifecyclePaths;
+    await removeLinuxMarker(result.enabledMarker);
+    const paths = windowsKeeperPaths(result);
+    paths.taskName = probe.taskName;
+    await runHost("schtasks.exe", ["/Change", "/TN", paths.taskName, "/DISABLE"], true);
+    return paths;
+  }
   const paths = lifecyclePaths(process.env, platform());
   await applyStoredTaskName(paths);
   await managedControl(paths, "pause", true);
@@ -533,6 +669,7 @@ export async function stop(options: LifecycleOptions = {}): Promise<LifecyclePat
 export async function upgrade(options: LifecycleOptions): Promise<LifecyclePaths> {
   if (!options.executable) throw new LifecycleError("executable_required", "upgrade requires --executable");
   applyOptions(options);
+  if (platform() === "win32") return await runWslCli("upgrade", options) as LifecyclePaths;
   const paths = lifecyclePaths(process.env, platform());
   await applyStoredTaskName(paths);
   const version = validateVersion(options.version);
@@ -545,6 +682,7 @@ export async function upgrade(options: LifecycleOptions): Promise<LifecyclePaths
 
 export async function rollback(options: LifecycleOptions = {}): Promise<LifecyclePaths> {
   applyOptions(options);
+  if (platform() === "win32") return await runWslCli("rollback", options) as LifecyclePaths;
   const paths = lifecyclePaths(process.env, platform());
   await applyStoredTaskName(paths);
   const previous = await readOptional(paths.previousRelease);
@@ -560,6 +698,17 @@ export async function rollback(options: LifecycleOptions = {}): Promise<Lifecycl
 
 export async function uninstall(options: LifecycleOptions = {}): Promise<LifecyclePaths> {
   applyOptions(options);
+  if (platform() === "win32") {
+    const probe = windowsKeeperPaths(lifecyclePaths(process.env, platform()));
+    await applyStoredTaskName(probe);
+    const task = await taskOwnership(probe);
+    if (task === "foreign") throw new LifecycleError("task_owned_elsewhere", `scheduled task already exists and is not owned by this installation: ${probe.taskName}`);
+    const result = await runWslCli("uninstall", options) as LifecyclePaths;
+    await removeLinuxMarker(result.enabledMarker);
+    if (task === "owned") await runHost("schtasks.exe", ["/Delete", "/TN", probe.taskName, "/F"], true);
+    for (const path of [probe.launcher, probe.taskXml, probe.metadata]) await rm(path, { force: true });
+    return { ...result, launcher: probe.launcher, taskXml: probe.taskXml, metadata: probe.metadata, taskName: probe.taskName };
+  }
   const paths = lifecyclePaths(process.env, platform());
   await applyStoredTaskName(paths);
   const unit = await unitOwnership(paths);

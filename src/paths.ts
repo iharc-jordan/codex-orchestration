@@ -7,6 +7,11 @@ export function toWslPath(input: string): string {
   return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
 }
 
+export function toWslServicePath(input: string): string {
+  if (input.startsWith("/")) return input;
+  return toWslPath(input);
+}
+
 export function fromWslPath(input: string): string {
   const match = /^\/mnt\/([A-Za-z])\/(.*)$/.exec(input);
   if (!match) throw new Error("WSL path must be on a local Windows drive");

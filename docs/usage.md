@@ -17,6 +17,12 @@ the managed lock, journal, logs, and workspaces; data contains staged releases
 and the current release pointer. Setup installs the owned service assets but
 does not enable or resume execution.
 
+On Windows, setup delegates these Linux-owned roots and service operations to
+Ubuntu WSL. The installed bridge also runs its Linux Node process in Ubuntu, so
+the default configuration, token, staged release, journal, logs, and workspaces
+are read from the same WSL home. Windows retains only the hidden standard-user
+keeper task and its launcher metadata under the user data directory.
+
 Use these commands for the lifecycle:
 
 ```text
