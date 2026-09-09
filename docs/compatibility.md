@@ -11,8 +11,8 @@ The initial supported targets are Windows with Ubuntu WSL2 and native Ubuntu Lin
 | Codex CLI | 0.153.4 | Windows and Linux; existing account authentication |
 | GitHub CLI | 2.100.0 | Linux Projects and repository reads |
 | Node.js | 24.15.0 Windows; 24.13.1 Linux | Bridge development and focused tests |
-| Symphony source | `5459015` / runtime `0.1.5` | Current version-only candidate, based on the green source gate at `e8b3a9d`; a new runtime gate is pending after the revision-recovery repair |
-| Installed Symphony binary | `0.1.4` from `0a53a0a` | Disposable workflow and interruption/recovery evidence passed; the installed service is stopped pending the current runtime repair |
+| Symphony source | `011c7233aa64307f63ac808c4e2802c8bebda819` / runtime `0.1.6` | Current candidate; qualified full gate passed 425 tests with zero failures, six skips, 100% configured coverage, format, specs, Credo, and Dialyzer |
+| Installed Symphony binary | `0.1.6` from `011c7233aa64307f63ac808c4e2802c8bebda819` | Upgrade/start verification passed with HTTP 200 and preserved MCP state; bounded PM pilot is resuming |
 | Elixir / OTP | Repository-pinned mise toolchain | Build and full upstream checks |
 
 Package metadata declares Node.js 20 or later. That declaration is not a claim that every intervening Node version has been tested. Release receipts must identify the exact plugin, Symphony integration and executable versions tested together.
@@ -36,11 +36,13 @@ Windows sleep, shutdown and explicit WSL termination interrupt execution. Recove
 The installed disposable run passed four-assignment enrollment, dispatch, review,
 acceptance, dependency unlocking, and clean stop. A forced owned-service stop
 also recovered the same App Server thread with a new turn, one checkpoint, one
-completion, and exact-once filesystem and commit effects. A later fresh PM pilot
-exposed a revision-recovery defect after caller-fingerprint handling, involving
-retry bookkeeping and obsolete automatic effect intents. The pilot is paused
-while the runtime is repaired. The 0.1.4 service remains stopped; do not
-infer current-release validation from the earlier disposable pass.
+completion, and exact-once filesystem and commit effects. The qualified 0.1.6
+source gate additionally covers controls-first revision recovery, current-intent
+reread, retry/block reset with a nonzero lifetime allowance, and ordered obsolete
+automatic-intent retirement after provider and local commit. The 0.1.6
+installation/start verification passed with HTTP 200 and preserved MCP state.
+The bounded PM pilot is resuming; the prior 0.1.4 disposable evidence remains
+the recorded four-assignment and interruption/recovery proof.
 
 The hidden Windows launcher keeps an enabled WSL service session available. It must not change global WSL idle settings, Windows power settings or unrelated startup tasks. Native Ubuntu uses the user service manager directly.
 
@@ -48,10 +50,9 @@ Native Windows workers, distributed scheduling, automatic migration of desktop w
 
 ## Release acceptance
 
-The combined source gate at `e8b3a9d` passed 420 tests with zero failures, six
-skips, and 100% configured coverage. The 0.1.4 build smoke and installed
-disposable workflow passed, but the 0.1.5 version-only candidate needs a new
-green runtime gate after the revision-recovery repair. Fresh PM pilot work is
-paused pending that repair and has not been accepted. Public publication has
-not been performed. Track accepted evidence in release notes; do not infer
-release readiness from this compatibility table alone.
+The qualified 0.1.6 source gate passed 425 tests with zero failures, six skips,
+100% configured coverage, format, specs, Credo, and Dialyzer. The 0.1.6 binary
+is built and its installation/start verification passed with HTTP 200 and
+preserved MCP state. The bounded PM pilot is resuming and has not been
+accepted. Public publication has not been performed. Track accepted evidence in release notes;
+do not infer release readiness from this compatibility table alone.
