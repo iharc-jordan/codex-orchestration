@@ -708,7 +708,8 @@ function windowsKeeperPaths(linuxPaths) {
   const home = process.env.USERPROFILE || homedir2();
   const configuredData = process.env.XDG_DATA_HOME?.trim();
   const dataBase = configuredData && /^[A-Za-z]:[\\/]/.test(configuredData) ? configuredData : join2(home, ".local", "share");
-  const root = join2(dataBase, "codex-orchestration");
+  const service = linuxPaths.serviceName.replace(/\.service$/, "");
+  const root = join2(dataBase, "codex-orchestration", service);
   return {
     ...linuxPaths,
     launcher: join2(root, "bin", "windows-launcher.ps1"),
@@ -798,7 +799,8 @@ function windowsLauncher(paths) {
   const powershellQuote = (input) => `'${input.replaceAll("'", "''")}'`;
   return [
     "$ErrorActionPreference = 'Stop'",
-    `if (-not (Test-Path -LiteralPath ${powershellQuote(paths.enabledMarker)})) { exit 0 }`,
+    `wsl.exe -d Ubuntu -- test -f ${powershellQuote(marker)}`,
+    "if ($LASTEXITCODE -ne 0) { exit 0 }",
     `wsl.exe -d Ubuntu -- systemctl --user start ${powershellQuote(service)}`,
     "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
     `wsl.exe -d Ubuntu -- bash -lc ${powershellQuote(waitScript)}`,
