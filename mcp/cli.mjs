@@ -327,8 +327,11 @@ async function prepareExisting(workspace, remote) {
   if (top !== resolve3(workspace)) invalid("workspace_invalid", "workspace is not the checkout root");
   const actualRemote = await git(["remote", "get-url", "origin"], workspace);
   if (!sameRemote(actualRemote, remote)) invalid("repository_mismatch", "workspace origin does not match the enrolled repository");
-  await git(["fetch", "--no-tags", "--prune", "origin"], workspace);
   return false;
+}
+async function requireBaseCommit(workspace, baseCommit) {
+  const result = await gitResult(["cat-file", "-e", `${baseCommit}^{commit}`], workspace);
+  if (result.code !== 0) invalid("base_commit_unavailable", "requested base commit is not present in the checkout");
 }
 async function validateInputLocation(inputFile, policy, workspaceRoot) {
   let controlRoot;
@@ -375,7 +378,7 @@ async function prepareTrustedCheckout(options) {
       await git(["clone", "--no-checkout", "--origin", "origin", configured.remote, workspace.workspace]);
       cloned = true;
     }
-    await git(["cat-file", "-e", `${input.base_commit}^{commit}`], workspace.workspace);
+    await requireBaseCommit(workspace.workspace, input.base_commit);
     if (cloned) {
       await git(["checkout", "--detach", "--force", input.base_commit], workspace.workspace);
     } else {

@@ -71,6 +71,9 @@ test("trusted checkout consumes issue context, enforces enrollment, and pins the
     workspace: join(await realpath(workspaceRoot), "fixture-alpha")
   });
   assert.equal(await git(workspace, "rev-parse", "HEAD"), commit);
+  // Reuse must not execute a repository-local uploadpack command while checking
+  // an already-present base. A fetch here would fail on this deliberately bad command.
+  await git(workspace, "config", "remote.origin.uploadpack", "git-upload-pack --definitely-invalid-option");
   const cli = await execFileAsync(process.execPath, [join(process.cwd(), "dist/cli.js"), "checkout", "--input", input, "--policy", policy], {
     env: { ...process.env, SYMPHONY_ISSUE_CONTEXT: process.env.SYMPHONY_ISSUE_CONTEXT }
   });
