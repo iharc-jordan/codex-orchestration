@@ -35,11 +35,11 @@ curated marketplace requirement or assumed desktop-sidebar worker integration.
 | --- | --- | --- |
 | Required WSL toolchain and real worker proof | ACCEPTED | PM verified |
 | Additive github_projects tracker | REVIEW: full gate and live read pending | projects worker |
-| Generic hook context | REVIEW: coverage gate correction | hook worker |
-| Managed AppServer routes, resume and reports | READY after hook correction | hook worker |
+| Generic hook context | ACCEPTED: 308 tests, full gate, integrated c3397b5 | PM verified |
+| Managed AppServer routes, resume and reports | ACTIVE | AppServer worker |
 | Managed journal/lifecycle/controls | READY after adapter acceptance | projects worker |
-| Plugin MCP/client/skills | ACTIVE | bridge worker |
-| Service setup, launchers and release bundle | READY after bridge contract | bridge worker |
+| Plugin MCP/client/skills | ACCEPTED R1: 63d6972; operation schemas follow core | PM verified |
+| Service setup, launchers and release bundle | ACTIVE R2 | bridge worker |
 | Installed disposable workflow and recovery | WAITING on implementation | PM |
 | Fresh IHARC PM pilot | WAITING on installed proof | PM |
 | Public source/release/upstream PRs | WAITING on pilot | PM |
