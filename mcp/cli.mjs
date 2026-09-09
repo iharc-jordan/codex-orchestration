@@ -563,7 +563,8 @@ function lifecyclePaths(env = process.env, os = platform2()) {
   const dataRoot = root ? join2(root, "data") : join2(dataBase, "codex-orchestration");
   const stateRoot = root ? join2(root, "state") : join2(stateBase, "codex-orchestration");
   const serviceName = env.CODEX_ORCHESTRATION_SERVICE_NAME?.trim() || "codex-orchestration.service";
-  if (!SERVICE_NAME_PATTERN.test(serviceName.replace(/\.service$/, ""))) {
+  const serviceIdentity = serviceName.replace(/\.service$/, "");
+  if (!SERVICE_NAME_PATTERN.test(serviceIdentity) || serviceIdentity === "." || serviceIdentity === "..") {
     throw new LifecycleError("service_name_invalid", "service name contains unsupported characters");
   }
   const taskName = env.CODEX_ORCHESTRATION_TASK_NAME?.trim() || `Codex-Orchestration-${randomBytes(4).toString("hex")}`;
