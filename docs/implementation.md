@@ -38,8 +38,8 @@ curated marketplace requirement or assumed desktop-sidebar worker integration.
 | Generic hook context | ACCEPTED: 308 tests, full gate, integrated c3397b5 | PM verified |
 | Managed AppServer routes, resume and reports | ACCEPTED R1: 7526f12 plus reviewed budget fixes 3ac2a7e/48310ed; integrated e9415bf | PM verified |
 | Managed process containment and permission proof | ACTIVE R2 | AppServer worker |
-| Managed journal/lifecycle/controls | ACTIVE: feature/managed-core from d50dfaf | projects worker |
-| Plugin MCP/client/skills | ACCEPTED R1: 63d6972; operation schemas follow core | PM verified |
+| Managed journal/lifecycle/controls | Checkpoint 730849c under independent review; actual recovery and integration proof remain | projects worker |
+| Plugin MCP/client/skills and checkout helper | ACCEPTED module boundary: 2ad1b86 plus defd55d, eight tests and manifest validation; actual core hook/input integration remains | PM verified |
 | Service setup and launchers | ACCEPTED R2: 08dabb8, Linux and Windows lifecycle fixtures | PM verified |
 | Release dependencies | ACCEPTED: 137e8d1, full gate with 324 tests and clean dependency audit; integrated 66e2b94 | PM verified |
 | Self-contained executable and runtime notices | WAITING on combined runtime candidate | bridge worker |
