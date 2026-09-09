@@ -122,6 +122,32 @@ documents delayed telemetry and in-flight overshoot.
 
 ## Delivery evidence
 
+### AgentRunner / AppServer integration boundary
+
+The managed core passes explicit keyword options to `AgentRunner.run/3`:
+`model`, `effort`, optional `resume_thread_id`, `max_turns` (remaining allowance),
+`managed_attempt` (assignment/revision/generation/attempt identity), and an
+attempt-scoped report callback. Generic callers retain existing defaults.
+AppServer sends the selected model in thread start/resume and turn start, and
+effort in turn start. A resumed thread must match the requested ID and resolved
+route; unsupported or missing history returns an error, never thread/start.
+
+The core owns the durable allowance and authorization for each next turn. Runner
+callbacks obtain a serialized decision before a new turn; successful reporting
+ends work at REVIEW or WAITING without waiting for a stale board poll. Agent
+events include thread and turn IDs separately so recovery does not parse a
+concatenated display session ID. The report tool exposes no PM controls.
+
+The application already includes Burrito release targets for Linux x86_64 and
+arm64. Reuse this upstream release path for the self-contained executable rather
+than inventing another runtime packager.
+
+The existing IHARC closeout provides the next authorized area in
+`docs/operations/hosting-resource-isolation-handoff.md`. The fresh PM must choose
+a bounded deliverable from that work using current evidence and its provider,
+funding and test constraints. Do not implicitly enroll the entire hosting
+program or restart the predecessor tasks.
+
 Record targeted checks, exact revisions and unresolved gaps per component. Run
 upstream make all and plugin typecheck/test/build/manifest validation after
 integration. Prove actual installed MCP operation, a multi-repository dependency
