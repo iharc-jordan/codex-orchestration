@@ -53,6 +53,13 @@ its BEAM runtime and application dependencies. It still uses ordinary Ubuntu
 host libraries, including glibc and OpenSSL; it is not a fully static binary.
 Codex, GitHub CLI, Node, Git and systemd remain host prerequisites.
 
+Assign a new application version in Symphony's `elixir/mix.exs` for every
+changed executable release. Burrito 1.5.0 selects its extraction directory by
+release name, ERTS version and application version; an existing extraction is
+reused without comparing the new payload. Changing only the plugin CLI's
+`--version` release label does not refresh that directory. Verify upgrades with
+the existing user home and keep the prior version's extraction for rollback.
+
 The published input, source revisions, lockfiles and commands make the build
 repeatable. They do not establish byte-for-byte reproducibility of Burrito's
 result. Record the resulting executable digest, size, runtime dependency closure
