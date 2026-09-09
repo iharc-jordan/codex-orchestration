@@ -4,8 +4,10 @@ The shipped `mcp/cli.mjs` entrypoint manages the local Symphony executable and
 its host service. It does not install another Node, Codex, GitHub CLI, or
 scheduler.
 
-The first setup uses an explicit locally built Symphony executable and a private
-workflow file:
+The first setup uses an explicit Symphony release executable and a private
+workflow file. During development, build the candidate from its pinned source.
+Use the [generic workflow example](../fixtures/WORKFLOW.example.md) as a starting
+point and replace its paths and Project owner before setup:
 
 ```text
 node ./mcp/cli.mjs setup --executable /path/to/bin/symphony --workflow /path/to/WORKFLOW.md --version local-1 --port 8787
@@ -50,10 +52,12 @@ runtime is required.
 
 ## Trusted assignment checkout
 
-Symphony passes a bounded `SYMPHONY_ISSUE_CONTEXT` environment value to its
-`after_create` hook. The context contains the issue id, display identifier, and
-provider `native_ref`; it does not contain credentials, issue text, or commands.
-The hook can prepare the one checkout assigned to that attempt with:
+Managed Symphony calls its trusted workspace preparer after workspace creation
+and before `before_run` or Codex startup. Leave `hooks.after_create` empty for
+this profile. The preparer supplies bounded `SYMPHONY_ISSUE_CONTEXT` containing
+the Project item id, display identifier, and provider `native_ref`; it excludes
+credentials, issue text, and commands. It invokes the installed helper using
+the configured absolute paths, equivalent to:
 
 ```text
 node ./mcp/cli.mjs checkout --input /home/example/.local/state/codex-orchestration/attempts/attempt-1.json --policy /home/example/.config/codex-orchestration/checkout-policy.json
@@ -83,3 +87,71 @@ the requested commit; on reuse it verifies the origin and base ancestry, then
 preserves the current branch, local commits, and uncommitted worker changes.
 Git receives every value as a separate argument. The tracker adapter does not
 clone repositories or parse the operational journal.
+
+## Configuration reference
+
+The private Symphony workflow owns tracker, worker and execution configuration.
+The bridge's `config.json` contains only loopback connectivity and token-file
+location; it does not contain assignment state.
+
+| Setting | Purpose |
+| --- | --- |
+| `tracker.kind: github_projects` | Select the Projects adapter. |
+| `tracker.provider.owner_type`, `owner`, `project_number` | Select one exact user or organization Project. |
+| `tracker.provider.status_field_name` | Name of the Project's status field, normally `Status`. |
+| `tracker.provider.token` | Provider token or `$ENVIRONMENT_VARIABLE` reference. |
+| `workspace.root` | Parent of all managed worker checkouts. |
+| `agent.max_concurrent_agents` | Set to `2` for the initial profile. |
+| `agent.max_turns` | Set to `20`; retries share the assignment allowance. |
+| `codex.command` | Existing Linux Codex App Server command; use absolute runtime paths where needed. |
+| `managed.enabled` | Enables the managed profile; explicit binding and enrollment are still required. |
+| `managed.journal_path` | Private durable execution journal path. |
+| `managed.control_token_file` | Private non-empty bearer-token file also used by the bridge. |
+| `managed.checkout_node` | Existing Linux Node executable. |
+| `managed.checkout_helper_path` | Installed plugin's pinned `mcp/cli.mjs` path. |
+| `managed.checkout_policy_file` | Private repository allowlist and workspace/control path policy. |
+| `managed.usage_limit_tokens` | Optional aggregate worker limit; further work stops when reported usage reaches it. |
+
+Worker usage is measured from App Server telemetry. Updates can arrive late,
+and already running work can overshoot a cap. This limit does not include the
+PM's separate desktop usage. The journal preserves cumulative accounting and
+attempt identity across recovery.
+
+Provide service credentials through the user service manager, for example an
+owner-only `EnvironmentFile` in a systemd drop-in for the installed unit. Set the
+Linux `PATH` there if Node or Git is installed outside standard directories.
+Never place tokens in public workflow examples, repository files, or command
+arguments. The worker process excludes tracker credential environment variables.
+Protect the private configuration root with owner-only permissions.
+
+For custom roots, pass `--root` consistently to lifecycle commands and point the
+bridge at that root's Linux `config/config.json` using
+`CODEX_ORCHESTRATION_CONFIG`. Update the workflow's journal, token, checkout and
+workspace paths to match. A plugin upgrade must keep the old helper available
+until the service workflow points at the new installed helper.
+
+## Recovery and troubleshooting
+
+- `config_missing` means the bridge launched but cannot find its Linux
+  configuration. Check the WSL home and any explicit configuration override.
+- An inactive service needs setup/start; an active service with no work may be
+  paused, unbound, unenrolled, blocked by dependencies, or at its usage limit.
+  Read managed state and events before changing it.
+- A credential or Project binding failure needs a corrected private service
+  configuration or provider access. Do not change assignment state to bypass it.
+- After a crash, keep the journal and workspaces. Reconcile the owned process,
+  Git changes and pending GitHub effects before authorizing another attempt.
+  Recovery uses the recorded thread with a new turn; missing history is a
+  visible blocker, not permission to replay the assignment in a new thread.
+- An uncertain stop retains ownership. Inspect the named systemd scope and its
+  recorded identity; do not kill unrelated processes or clear the journal.
+- Damaged journals fail visibly. Preserve a copy for diagnosis and restore only
+  a known matching execution checkpoint after resolving external effects.
+- Repeated transient failure reaches `WAITING` after two automatic retries.
+  Diagnose the cause and use explicit review/revision controls for further work.
+
+For an upgrade, pause and let healthy work reach review, then stop the service.
+Stage the new executable, update any changed private configuration, and start it.
+If validation fails, stop and use `rollback` to restore the previous staged
+executable. Keep compatible configuration and journal backups; a binary rollback
+does not undo Git changes or GitHub writes.

@@ -16,6 +16,16 @@ The initial supported targets are Windows with Ubuntu WSL2 and native Ubuntu Lin
 
 Package metadata declares Node.js 20 or later. That declaration is not a claim that every intervening Node version has been tested. Release receipts must identify the exact plugin, Symphony integration and executable versions tested together.
 
+The Linux x86_64 release candidate embeds the reviewed OTP/ERTS runtime, so users
+do not need Elixir or Erlang development tools. Its custom ERTS targets Ubuntu
+24.04-compatible systems and dynamically uses host libraries, including
+`libcrypto.so.3`, `libtinfo.so.6`, `libz.so.1`, `libstdc++.so.6`, and glibc with
+`GLIBC_2.38`. It is not a static universal Linux binary. Systemd user services,
+Git, Node and the existing authenticated Codex CLI are required at runtime.
+The tested host is Ubuntu under WSL2; a separate bare-metal installation has not
+yet been verified. macOS, ARM64 and native Windows worker binaries are not part
+of this candidate.
+
 ## Execution and recovery boundaries
 
 A healthy service can continue authorized work after the PM or MCP client disconnects. Pending results wait for PM review. This does not promise that an idle desktop task can be woken by MCP.
