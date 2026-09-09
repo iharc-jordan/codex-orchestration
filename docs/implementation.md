@@ -41,7 +41,7 @@ curated marketplace requirement or assumed desktop-sidebar worker integration.
 | Plugin MCP/client/skills | ACCEPTED R1: 63d6972; operation schemas follow core | PM verified |
 | Service setup and launchers | ACCEPTED R2: 08dabb8, Linux and Windows lifecycle fixtures | PM verified |
 | Release dependencies and executable | ACTIVE: separate downstream patch | bridge worker |
-| Personal marketplace installation/discovery | Installed 0.1.0; fresh-task MCP check ACTIVE | PM |
+| Personal marketplace installation/discovery | ACCEPTED: installed 0.1.0, actual fresh-task MCP diagnostics | PM verified |
 | Installed disposable workflow and recovery | WAITING on implementation | PM |
 | Fresh IHARC PM pilot | WAITING on installed proof | PM |
 | Public source/release/upstream PRs | WAITING on pilot | PM |
@@ -171,6 +171,12 @@ maintains the WSL session after the caller exits, and stop removes that keeper.
 The PM verified that owned test units/tasks were removed and the existing
 `Launch Codex` task remained unchanged. These fixtures used a test managed API;
 the actual Symphony recovery and installed workflow checks remain outstanding.
+
+Personal marketplace installation of `0.1.0` succeeded with the bundled bridge.
+A fresh Codex task called the actual `orchestration_diagnostics` MCP tool through
+WSL and received the expected `config_missing` response before service setup.
+This establishes discovery and launch only. A configured service, managed
+controls, and clean public Git installation still require their own proof.
 
 Create the approved private IHARC Labs GitHub Project. A fresh Astra PM selects
 one bounded already-authorized delivery from existing IHARC work and uses the
