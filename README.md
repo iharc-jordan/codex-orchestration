@@ -74,7 +74,8 @@ continuous-execution guarantees.
 - [Service setup, diagnostics, upgrade, rollback, and uninstall](docs/usage.md)
 - [Control contracts](contracts/README.md)
 - [Data handling](docs/data-handling.md)
-- [Contribution and build instructions](CONTRIBUTING.md)
+- [Contribution instructions](CONTRIBUTING.md)
+- [Release builds and runtime inputs](docs/release.md)
 - [Downstream changes and validation](docs/implementation.md)
 - [Third-party notices for the bundled bridge](THIRD_PARTY_NOTICES.md)
 
