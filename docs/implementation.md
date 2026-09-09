@@ -34,10 +34,10 @@ curated marketplace requirement or assumed desktop-sidebar worker integration.
 | Component | State | Owner |
 | --- | --- | --- |
 | Required WSL toolchain and real worker proof | ACCEPTED | PM verified |
-| Additive github_projects tracker | REVIEW: full gate and live read pending | projects worker |
+| Additive github_projects tracker | ACCEPTED: 312 tests, full gate, both live reads; integrated d50dfaf | PM verified |
 | Generic hook context | ACCEPTED: 308 tests, full gate, integrated c3397b5 | PM verified |
 | Managed AppServer routes, resume and reports | ACTIVE | AppServer worker |
-| Managed journal/lifecycle/controls | READY after adapter acceptance | projects worker |
+| Managed journal/lifecycle/controls | ACTIVE: feature/managed-core from d50dfaf | projects worker |
 | Plugin MCP/client/skills | ACCEPTED R1: 63d6972; operation schemas follow core | PM verified |
 | Service setup, launchers and release bundle | ACTIVE R2 | bridge worker |
 | Installed disposable workflow and recovery | WAITING on implementation | PM |
