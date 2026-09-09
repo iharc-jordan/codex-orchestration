@@ -150,11 +150,11 @@ The application already includes Burrito release targets for Linux x86_64 and
 arm64. Reuse this upstream release path for the self-contained executable rather
 than inventing another runtime packager.
 
-The existing IHARC closeout provides the next authorized area in
-`docs/operations/hosting-resource-isolation-handoff.md`. The fresh PM must choose
-a bounded deliverable from that work using current evidence and its provider,
-funding and test constraints. Do not implicitly enroll the entire hosting
-program or restart the predecessor tasks.
+A real pilot must select one bounded, already-authorized deliverable using its
+current repository instructions and provider, funding and test constraints.
+Do not implicitly enroll an entire program or restart predecessor tasks.
+Keep private pilot prompts, issue content and detailed receipts outside the
+public plugin repository.
 
 Record targeted checks, exact revisions and unresolved gaps per component. Run
 upstream make all and plugin typecheck/test/build/manifest validation after
