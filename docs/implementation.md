@@ -33,11 +33,13 @@ curated marketplace requirement or assumed desktop-sidebar worker integration.
 
 | Component | State | Owner |
 | --- | --- | --- |
-| Required WSL toolchain and baseline build | ACTIVE | foundation worker |
-| Additive github_projects tracker | ACTIVE | projects worker |
-| Generic hook context | ACTIVE | hook worker |
-| Managed journal/lifecycle/AppServer routes | READY after interface review | pending |
-| Plugin MCP/CLI/launchers/skills | READY | pending |
+| Required WSL toolchain and real worker proof | ACCEPTED | PM verified |
+| Additive github_projects tracker | REVIEW: full gate and live read pending | projects worker |
+| Generic hook context | REVIEW: coverage gate correction | hook worker |
+| Managed AppServer routes, resume and reports | READY after hook correction | hook worker |
+| Managed journal/lifecycle/controls | READY after adapter acceptance | projects worker |
+| Plugin MCP/client/skills | ACTIVE | bridge worker |
+| Service setup, launchers and release bundle | READY after bridge contract | bridge worker |
 | Installed disposable workflow and recovery | WAITING on implementation | PM |
 | Fresh IHARC PM pilot | WAITING on installed proof | PM |
 | Public source/release/upstream PRs | WAITING on pilot | PM |
@@ -88,11 +90,17 @@ the Elixir service tests and TypeScript bridge as checked fixtures.
   commit, ownership/resources, and the resolved allowed model/effort route.
 - Revision updates material requirements and invalidates conflicting old work.
 - Pause stops new dispatch/retries and drains healthy active work. Resume polls.
+- Host stop uses `pause` with `args.disable = true`: persist disabled intent and
+  deny further turns before stopping the owned systemd unit. Ordinary pause has
+  `disable = false` and lets healthy active assignments continue to review.
 - Interrupt/cancel reconcile the actual owned process state before release.
 - Review accepts current evidence, requests rework, or records WAITING.
 
 Setup/start/stop use the host service manager. Stop persists paused/disabled
 intent before stopping owned execution; install does not arm or dispatch work.
+The Windows enabled-service marker governs logon restoration only; it is not an
+assignment store. A normal pause keeps that marker but preserves paused journal
+state across restart. Uninstall preserves configuration, journal and workspaces.
 
 The worker has an attempt-scoped dynamic `orchestration_report` tool for result,
 checkpoint and context-needed reports. It cannot accept work or invoke PM
