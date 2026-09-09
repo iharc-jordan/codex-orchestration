@@ -15740,11 +15740,11 @@ var Protocol = class {
    *
    * Note that this will replace any previous request handler for the same method.
    */
-  setRequestHandler(requestSchema2, handler) {
-    const method = getMethodLiteral(requestSchema2);
+  setRequestHandler(requestSchema, handler) {
+    const method = getMethodLiteral(requestSchema);
     this.assertRequestHandlerCapability(method);
     this._requestHandlers.set(method, (request, extra) => {
-      const parsed = parseWithCompat(requestSchema2, request);
+      const parsed = parseWithCompat(requestSchema, request);
       return Promise.resolve(handler(parsed, extra));
     });
   }
@@ -16321,8 +16321,8 @@ var Server = class extends Protocol {
   /**
    * Override request handler registration to enforce server-side validation for tools/call.
    */
-  setRequestHandler(requestSchema2, handler) {
-    const shape = getObjectShape(requestSchema2);
+  setRequestHandler(requestSchema, handler) {
+    const shape = getObjectShape(requestSchema);
     const methodSchema = shape?.method;
     if (!methodSchema) {
       throw new Error("Schema is missing a method literal");
@@ -16356,9 +16356,9 @@ var Server = class extends Protocol {
         }
         return validationResult.data;
       };
-      return super.setRequestHandler(requestSchema2, wrappedHandler);
+      return super.setRequestHandler(requestSchema, wrappedHandler);
     }
-    return super.setRequestHandler(requestSchema2, handler);
+    return super.setRequestHandler(requestSchema, handler);
   }
   assertCapabilityForMethod(method) {
     switch (method) {
@@ -16982,14 +16982,116 @@ function asBridgeError(error2) {
 
 // src/server.ts
 var controlOperations = ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"];
-var requestSchema = {
+var revisionProperty = { type: "integer", minimum: 0, description: "Current global or assignment revision required for compare-and-set." };
+var assignmentIdProperty = { type: "string", minLength: 1, description: "Underlying enrolled assignment identity." };
+var routeProperty = {
   type: "object",
   properties: {
-    request_id: { type: "string", minLength: 1, description: "Caller-owned idempotency key. Reuse it only for the same input." },
-    args: { type: "object", additionalProperties: true, description: "Operation-specific arguments, including expected_revision where required." }
+    model: { type: "string", enum: ["gpt-5.6-luna", "gpt-5.6-terra"] },
+    effort: { type: "string", enum: ["xhigh", "max"] },
+    reason: { type: "string", minLength: 1 }
   },
-  required: ["request_id", "args"],
+  required: ["model", "effort"],
   additionalProperties: false
+};
+var operationArgSchemas = {
+  bind_project: {
+    type: "object",
+    properties: {
+      expected_revision: revisionProperty,
+      project: {
+        type: "object",
+        properties: {
+          project_id: { type: "string", minLength: 1 },
+          project_number: { type: "integer", minimum: 1 },
+          status_field_id: { type: "string", minLength: 1 },
+          status_options: { type: "object", minProperties: 1, additionalProperties: { type: "string", minLength: 1 } },
+          repositories: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } }
+        },
+        required: ["project_id", "project_number", "status_field_id", "status_options", "repositories"],
+        additionalProperties: false
+      }
+    },
+    required: ["expected_revision", "project"],
+    additionalProperties: true
+  },
+  enroll: {
+    type: "object",
+    properties: {
+      expected_revision: revisionProperty,
+      assignment_id: assignmentIdProperty,
+      repository: { type: "string", minLength: 1 },
+      issue_number: { type: "integer", minimum: 1 },
+      base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
+      board_state: { type: "string", enum: ["READY"] },
+      owner: { type: "string", minLength: 1 },
+      resources: { type: "array", items: { type: "string" } },
+      dependencies: { type: "array", items: { type: "string" } },
+      route: routeProperty,
+      requirements_fingerprint: { type: "string", minLength: 1 },
+      requirements_revision: { type: "integer", minimum: 0 }
+    },
+    required: ["expected_revision", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
+    additionalProperties: true
+  },
+  revise: {
+    type: "object",
+    properties: {
+      expected_revision: revisionProperty,
+      assignment_id: assignmentIdProperty,
+      changes: {
+        type: "object",
+        properties: {
+          base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
+          route: routeProperty,
+          resources: { type: "array", items: { type: "string" } },
+          dependencies: { type: "array", items: { type: "string" } },
+          requirements: { type: "object" },
+          requirements_fingerprint: { type: "string", minLength: 1 },
+          requirements_revision: { type: "integer", minimum: 0 }
+        },
+        additionalProperties: false
+      }
+    },
+    required: ["expected_revision", "assignment_id", "changes"],
+    additionalProperties: true
+  },
+  pause: {
+    type: "object",
+    properties: { expected_revision: revisionProperty, disable: { type: "boolean" }, reason: { type: "string" } },
+    required: ["expected_revision"],
+    additionalProperties: true
+  },
+  resume: {
+    type: "object",
+    properties: { expected_revision: revisionProperty, reason: { type: "string" } },
+    required: ["expected_revision"],
+    additionalProperties: true
+  },
+  interrupt: {
+    type: "object",
+    properties: { expected_revision: revisionProperty, assignment_id: assignmentIdProperty, reason: { type: "string", minLength: 1 } },
+    required: ["expected_revision", "assignment_id", "reason"],
+    additionalProperties: true
+  },
+  cancel: {
+    type: "object",
+    properties: { expected_revision: revisionProperty, assignment_id: assignmentIdProperty, reason: { type: "string" } },
+    required: ["expected_revision", "assignment_id"],
+    additionalProperties: true
+  },
+  review: {
+    type: "object",
+    properties: {
+      expected_revision: revisionProperty,
+      assignment_id: assignmentIdProperty,
+      disposition: { type: "string", enum: ["accepted", "rework", "waiting", "blocked"] },
+      evidence: { type: "array", items: { type: "string", minLength: 1 } },
+      reason: { type: "string" }
+    },
+    required: ["expected_revision", "assignment_id", "disposition"],
+    additionalProperties: true
+  }
 };
 var tools = [
   {
@@ -17018,8 +17120,16 @@ var tools = [
   },
   ...controlOperations.map((operation) => ({
     name: `orchestration_${operation}`,
-    description: `Submit the ${operation} operation to Symphony. The caller supplies request_id and operation-specific args; the bridge preserves both and never retries writes.`,
-    inputSchema: requestSchema
+    description: `Submit the ${operation} operation to Symphony. Supply a caller-owned request_id and the operation-specific args; the bridge preserves both and never retries writes.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        request_id: { type: "string", minLength: 1, maxLength: 256, description: "Caller-owned idempotency key. Reuse it only for the same input." },
+        args: operationArgSchemas[operation]
+      },
+      required: ["request_id", "args"],
+      additionalProperties: false
+    }
   }))
 ];
 function jsonResult(value) {

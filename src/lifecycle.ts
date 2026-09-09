@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve, win32 } from "node:path";
 import { randomBytes } from "node:crypto";
-import { BridgeError, ManagedClient } from "./client.js";
+import { BridgeError, ManagedClient, type ManagedState } from "./client.js";
 import { toWslPath } from "./paths.js";
 
 const execFile = promisify(nodeExecFile);
@@ -431,10 +431,10 @@ function requestId(operation: string): string {
 async function managedControl(paths: LifecyclePaths, operation: "pause" | "resume", disable: boolean): Promise<unknown> {
   await ensureConfigEnv(paths);
   const client = await ManagedClient.fromConfig();
-  let state: { revision?: unknown } | undefined;
+  let state: ManagedState | undefined;
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
-      state = await client.state() as { revision?: unknown };
+      state = await client.state();
       break;
     } catch (error) {
       if (!(error instanceof BridgeError) || error.code !== "upstream_unreachable" || attempt === 49) throw error;

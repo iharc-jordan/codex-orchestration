@@ -13,11 +13,13 @@ The loopback service exposes `GET /api/v1/managed/state`,
 `expected_revision` supplied in `args`; uncertain writes are returned as errors
 and are never retried by this bridge.
 
-The exact operation-specific argument fields and error payload envelope remain
-pending the managed Elixir endpoint implementation. This fixture deliberately
-keeps `args` extensible so both sides can add fields without a second scheduler
-or a duplicate assignment database. The bridge rejects unsupported operation
-names and oversized requests before contacting the service.
+The checked fixture records the operation-specific request and response shapes
+for binding, enrollment, revision, pause/resume, interruption, cancellation, and
+review. `args` remains extensible so the service can add compatible fields
+without a second scheduler or a duplicate assignment database. The bridge
+rejects unsupported operation names and oversized requests before contacting the
+service. Review effects such as Project status changes and issue closure remain
+service-owned; the bridge only transports the control request and response.
 
 On Windows, the launcher runs the bundle in the configured Ubuntu WSL
 environment and resolves `node` from the login environment. If that environment

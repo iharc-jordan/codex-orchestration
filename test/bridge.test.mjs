@@ -170,6 +170,25 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
     "orchestration_pause", "orchestration_resume", "orchestration_interrupt",
     "orchestration_cancel", "orchestration_review"
   ]);
+  const listedTools = new Map(listed.result.tools.map((tool) => [tool.name, tool]));
+  const operationRequirements = {
+    orchestration_bind_project: ["expected_revision", "project"],
+    orchestration_enroll: ["expected_revision", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
+    orchestration_revise: ["expected_revision", "assignment_id", "changes"],
+    orchestration_pause: ["expected_revision"],
+    orchestration_resume: ["expected_revision"],
+    orchestration_interrupt: ["expected_revision", "assignment_id", "reason"],
+    orchestration_cancel: ["expected_revision", "assignment_id"],
+    orchestration_review: ["expected_revision", "assignment_id", "disposition"]
+  };
+  for (const [name, required] of Object.entries(operationRequirements)) {
+    const schema = listedTools.get(name).inputSchema;
+    assert.deepEqual(schema.required, ["request_id", "args"]);
+    assert.equal(schema.additionalProperties, false);
+    assert.deepEqual(schema.properties.args.required, required);
+  }
+  assert.deepEqual(listedTools.get("orchestration_review").inputSchema.properties.args.properties.disposition.enum, ["accepted", "rework", "waiting", "blocked"]);
+  assert.deepEqual(listedTools.get("orchestration_enroll").inputSchema.properties.args.properties.route.properties.model.enum, ["gpt-5.6-luna", "gpt-5.6-terra"]);
 
   const state = await request(3, "tools/call", { name: "orchestration_state", arguments: {} });
   assert.deepEqual(JSON.parse(state.result.content[0].text), { state: "READY", revision: 9, latest_cursor: 7 });

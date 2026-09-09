@@ -2,20 +2,123 @@ import { execFileSync, spawn } from "node:child_process";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { asBridgeError, BridgeError, ControlOperation, ManagedClient } from "./client.js";
+import { asBridgeError, BridgeError, ControlArgs, ControlOperation, ManagedClient } from "./client.js";
 import { validateConfig } from "./config.js";
 import { resolvedScriptPath, toWslPath } from "./paths.js";
 
 const controlOperations: ControlOperation[] = ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"];
 
-const requestSchema = {
+const revisionProperty = { type: "integer", minimum: 0, description: "Current global or assignment revision required for compare-and-set." };
+const assignmentIdProperty = { type: "string", minLength: 1, description: "Underlying enrolled assignment identity." };
+const routeProperty = {
   type: "object",
   properties: {
-    request_id: { type: "string", minLength: 1, description: "Caller-owned idempotency key. Reuse it only for the same input." },
-    args: { type: "object", additionalProperties: true, description: "Operation-specific arguments, including expected_revision where required." }
+    model: { type: "string", enum: ["gpt-5.6-luna", "gpt-5.6-terra"] },
+    effort: { type: "string", enum: ["xhigh", "max"] },
+    reason: { type: "string", minLength: 1 }
   },
-  required: ["request_id", "args"],
+  required: ["model", "effort"],
   additionalProperties: false
+};
+
+const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
+  bind_project: {
+    type: "object",
+    properties: {
+      expected_revision: revisionProperty,
+      project: {
+        type: "object",
+        properties: {
+          project_id: { type: "string", minLength: 1 },
+          project_number: { type: "integer", minimum: 1 },
+          status_field_id: { type: "string", minLength: 1 },
+          status_options: { type: "object", minProperties: 1, additionalProperties: { type: "string", minLength: 1 } },
+          repositories: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } }
+        },
+        required: ["project_id", "project_number", "status_field_id", "status_options", "repositories"],
+        additionalProperties: false
+      }
+    },
+    required: ["expected_revision", "project"],
+    additionalProperties: true
+  },
+  enroll: {
+    type: "object",
+    properties: {
+      expected_revision: revisionProperty,
+      assignment_id: assignmentIdProperty,
+      repository: { type: "string", minLength: 1 },
+      issue_number: { type: "integer", minimum: 1 },
+      base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
+      board_state: { type: "string", enum: ["READY"] },
+      owner: { type: "string", minLength: 1 },
+      resources: { type: "array", items: { type: "string" } },
+      dependencies: { type: "array", items: { type: "string" } },
+      route: routeProperty,
+      requirements_fingerprint: { type: "string", minLength: 1 },
+      requirements_revision: { type: "integer", minimum: 0 }
+    },
+    required: ["expected_revision", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
+    additionalProperties: true
+  },
+  revise: {
+    type: "object",
+    properties: {
+      expected_revision: revisionProperty,
+      assignment_id: assignmentIdProperty,
+      changes: {
+        type: "object",
+        properties: {
+          base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
+          route: routeProperty,
+          resources: { type: "array", items: { type: "string" } },
+          dependencies: { type: "array", items: { type: "string" } },
+          requirements: { type: "object" },
+          requirements_fingerprint: { type: "string", minLength: 1 },
+          requirements_revision: { type: "integer", minimum: 0 }
+        },
+        additionalProperties: false
+      }
+    },
+    required: ["expected_revision", "assignment_id", "changes"],
+    additionalProperties: true
+  },
+  pause: {
+    type: "object",
+    properties: { expected_revision: revisionProperty, disable: { type: "boolean" }, reason: { type: "string" } },
+    required: ["expected_revision"],
+    additionalProperties: true
+  },
+  resume: {
+    type: "object",
+    properties: { expected_revision: revisionProperty, reason: { type: "string" } },
+    required: ["expected_revision"],
+    additionalProperties: true
+  },
+  interrupt: {
+    type: "object",
+    properties: { expected_revision: revisionProperty, assignment_id: assignmentIdProperty, reason: { type: "string", minLength: 1 } },
+    required: ["expected_revision", "assignment_id", "reason"],
+    additionalProperties: true
+  },
+  cancel: {
+    type: "object",
+    properties: { expected_revision: revisionProperty, assignment_id: assignmentIdProperty, reason: { type: "string" } },
+    required: ["expected_revision", "assignment_id"],
+    additionalProperties: true
+  },
+  review: {
+    type: "object",
+    properties: {
+      expected_revision: revisionProperty,
+      assignment_id: assignmentIdProperty,
+      disposition: { type: "string", enum: ["accepted", "rework", "waiting", "blocked"] },
+      evidence: { type: "array", items: { type: "string", minLength: 1 } },
+      reason: { type: "string" }
+    },
+    required: ["expected_revision", "assignment_id", "disposition"],
+    additionalProperties: true
+  }
 };
 
 const tools = [
@@ -45,8 +148,16 @@ const tools = [
   },
   ...controlOperations.map((operation) => ({
     name: `orchestration_${operation}`,
-    description: `Submit the ${operation} operation to Symphony. The caller supplies request_id and operation-specific args; the bridge preserves both and never retries writes.`,
-    inputSchema: requestSchema
+    description: `Submit the ${operation} operation to Symphony. Supply a caller-owned request_id and the operation-specific args; the bridge preserves both and never retries writes.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        request_id: { type: "string", minLength: 1, maxLength: 256, description: "Caller-owned idempotency key. Reuse it only for the same input." },
+        args: operationArgSchemas[operation]
+      },
+      required: ["request_id", "args"],
+      additionalProperties: false
+    }
   }))
 ];
 
@@ -85,7 +196,7 @@ async function runBridge(): Promise<void> {
         return jsonResult(await client.control({
           request_id: args.request_id as string,
           operation,
-          args: args.args as Record<string, unknown>
+          args: args.args as ControlArgs
         }));
       }
       return errorResult(new Error("unknown tool"));

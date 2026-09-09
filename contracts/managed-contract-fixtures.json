@@ -1,37 +1,197 @@
 {
-  "operations": ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"],
-  "control_request": {
-    "request_id": "fixture-request-001",
-    "operation": "enroll",
-    "args": {
-      "issue_id": "project-item-1",
-      "revision": 4,
-      "base_git_commit": "0123456789abcdef0123456789abcdef01234567",
-      "ownership": { "generation": 2 },
-      "resources": ["repo:owner/name"],
-      "route": { "model": "gpt-5.6-luna", "effort": "xhigh" }
+  "workflow_managed": {
+    "enabled": true,
+    "journal_path": "/home/example/.local/state/codex-orchestration/journal.log",
+    "control_token_file": "/home/example/.config/codex-orchestration/control.token",
+    "event_limit": 100,
+    "event_wait_ms": 5000
+  },
+  "http": {
+    "state": {
+      "method": "GET",
+      "path": "/api/v1/managed/state",
+      "authorization": "Bearer <token-file-value>",
+      "response": {
+        "revision": 0,
+        "cursor": 0,
+        "paused": false,
+        "disabled": false,
+        "binding": null,
+        "assignments": {}
+      }
+    },
+    "events": {
+      "method": "GET",
+      "path": "/api/v1/managed/events?after=0&wait_ms=1000&limit=100",
+      "authorization": "Bearer <token-file-value>",
+      "response": {"after": 0, "events": [], "cursor": 0}
+    },
+    "bind_project": {
+      "method": "POST",
+      "path": "/api/v1/managed/control",
+      "body": {
+        "request_id": "bind-project-1",
+        "operation": "bind_project",
+        "args": {
+          "expected_revision": 0,
+          "project": {
+            "project_id": "project-example",
+            "project_number": 4,
+            "status_field_id": "status-field-example",
+            "status_options": {
+              "READY": "option-ready",
+              "ACTIVE": "option-active",
+              "REVIEW": "option-review",
+              "ACCEPTED": "option-accepted",
+              "WAITING": "option-waiting",
+              "CANCELLED": "option-cancelled"
+            },
+            "repositories": ["fixture-owner/fixture-repository"]
+          }
+        }
+      },
+      "response": {
+        "operation": "bind_project",
+        "binding": {
+          "project_id": "project-example",
+          "project_number": 4,
+          "status_field_id": "status-field-example",
+          "status_options": {
+            "READY": "option-ready",
+            "ACTIVE": "option-active",
+            "REVIEW": "option-review",
+            "ACCEPTED": "option-accepted",
+            "WAITING": "option-waiting",
+            "CANCELLED": "option-cancelled"
+          },
+          "repositories": ["fixture-owner/fixture-repository"]
+        },
+        "revision": 1
+      }
+    },
+    "enroll": {
+      "method": "POST",
+      "path": "/api/v1/managed/control",
+      "body": {
+        "request_id": "enroll-fixture-1",
+        "operation": "enroll",
+        "args": {
+          "expected_revision": 1,
+          "assignment_id": "project-item-example",
+          "repository": "fixture-owner/fixture-repository",
+          "issue_number": 42,
+          "base_commit": "0123456789abcdef0123456789abcdef01234567",
+          "board_state": "READY",
+          "owner": "fixture-owner",
+          "resources": ["repo:fixture-owner/fixture-repository"],
+          "dependencies": [],
+          "route": {"model": "gpt-5.6-luna", "effort": "xhigh"},
+          "requirements_fingerprint": "sha256:fixture-requirements",
+          "requirements_revision": 1
+        }
+      },
+      "response": {
+        "operation": "enroll",
+        "assignment_id": "project-item-example",
+        "revision": 1,
+        "phase": "ready",
+        "control_revision": 2
+      }
+    },
+    "revise": {
+      "method": "POST",
+      "path": "/api/v1/managed/control",
+      "body": {
+        "request_id": "revise-fixture-1",
+        "operation": "revise",
+        "args": {
+          "assignment_id": "project-item-example",
+          "expected_revision": 1,
+          "changes": {
+            "base_commit": "fedcba9876543210fedcba9876543210fedcba98",
+            "requirements_fingerprint": "sha256:fixture-requirements-2",
+            "requirements_revision": 2
+          }
+        }
+      },
+      "response": {
+        "operation": "revise",
+        "assignment_id": "project-item-example",
+        "revision": 2,
+        "phase": "ready"
+      }
+    },
+    "pause": {
+      "method": "POST",
+      "path": "/api/v1/managed/control",
+      "body": {
+        "request_id": "pause-fixture-1",
+        "operation": "pause",
+        "args": {"expected_revision": 2, "disable": false, "reason": "fixture pause"}
+      },
+      "response": {"operation": "pause", "revision": 3, "paused": true, "disabled": false}
+    },
+    "resume": {
+      "method": "POST",
+      "path": "/api/v1/managed/control",
+      "body": {
+        "request_id": "resume-fixture-1",
+        "operation": "resume",
+        "args": {"expected_revision": 3, "reason": "fixture resume"}
+      },
+      "response": {"operation": "resume", "revision": 4, "paused": false, "disabled": false}
+    },
+    "interrupt": {
+      "method": "POST",
+      "path": "/api/v1/managed/control",
+      "body": {
+        "request_id": "interrupt-fixture-1",
+        "operation": "interrupt",
+        "args": {"assignment_id": "project-item-example", "expected_revision": 1, "reason": "fixture interruption"}
+      },
+      "response": {"operation": "interrupt", "assignment_id": "project-item-example", "revision": 2, "phase": "waiting", "reason": "fixture interruption"}
+    },
+    "cancel": {
+      "method": "POST",
+      "path": "/api/v1/managed/control",
+      "body": {
+        "request_id": "cancel-fixture-1",
+        "operation": "cancel",
+        "args": {"assignment_id": "project-item-example", "expected_revision": 1, "reason": "fixture cancellation"}
+      },
+      "response": {"operation": "cancel", "assignment_id": "project-item-example", "revision": 2, "phase": "cancelled", "reason": "fixture cancellation"}
+    },
+    "review": {
+      "method": "POST",
+      "path": "/api/v1/managed/control",
+      "body": {
+        "request_id": "review-fixture-1",
+        "operation": "review",
+        "args": {
+          "assignment_id": "project-item-example",
+          "expected_revision": 1,
+          "disposition": "accepted",
+          "evidence": ["https://example.invalid/evidence/fixture-1"]
+        }
+      },
+      "response": {
+        "operation": "review",
+        "assignment_id": "project-item-example",
+        "revision": 2,
+        "phase": "accepted",
+        "disposition": "accepted",
+        "issue_close": "ok"
+      }
+    },
+    "errors": {
+      "stale_revision": {
+        "status": 409,
+        "body": {"error": {"code": "stale_revision", "message": "Managed request failed"}}
+      },
+      "unauthorized": {
+        "status": 401,
+        "body": {"error": {"code": "unauthorized", "message": "Unauthorized"}}
+      }
     }
-  },
-  "state": {
-    "state": "READY",
-    "revision": 4,
-    "latest_cursor": 12
-  },
-  "events": {
-    "after": 12,
-    "wait_ms": 1000,
-    "limit": 100,
-    "events": []
-  },
-  "error_codes": [
-    "config_missing",
-    "config_invalid",
-    "config_non_loopback",
-    "config_token_permissions",
-    "request_id_invalid",
-    "events_wait_invalid",
-    "events_limit_invalid",
-    "stale_revision",
-    "unknown_operation"
-  ]
+  }
 }

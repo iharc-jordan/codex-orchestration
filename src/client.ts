@@ -1,11 +1,134 @@
 import { BridgeConfig, ConfigError, loadConfig, readToken } from "./config.js";
 
 export type ControlOperation = "bind_project" | "enroll" | "revise" | "pause" | "resume" | "interrupt" | "cancel" | "review";
+export type ManagedPhase = "ready" | "active" | "review" | "accepted" | "waiting" | "cancelled";
+export type ReviewDisposition = "accepted" | "rework" | "waiting" | "blocked";
 
-export interface ControlRequest {
+export interface WorkerRoute {
+  model: string;
+  effort: string;
+  reason?: string;
+}
+
+export interface ProjectBinding {
+  project_id: string;
+  project_number: number;
+  status_field_id: string;
+  status_options: Record<string, string>;
+  repositories: string[];
+}
+
+export interface ManagedAssignment {
+  assignment_id?: string;
+  repository?: string;
+  issue_number?: number;
+  base_commit?: string;
+  board_state?: string;
+  phase?: ManagedPhase | string;
+  revision?: number;
+  control_revision?: number;
+  route?: WorkerRoute;
+  [key: string]: unknown;
+}
+
+export interface ManagedState {
+  revision: number;
+  cursor?: number;
+  latest_cursor?: number;
+  paused: boolean;
+  disabled: boolean;
+  binding: ProjectBinding | null;
+  assignments: Record<string, ManagedAssignment>;
+  [key: string]: unknown;
+}
+
+export interface ManagedEvent {
+  cursor?: number;
+  event?: string;
+  [key: string]: unknown;
+}
+
+export interface ManagedEvents {
+  events: ManagedEvent[];
+  cursor?: number;
+  latest_cursor?: number;
+  [key: string]: unknown;
+}
+
+export interface RevisionArgs {
+  expected_revision: number;
+  [key: string]: unknown;
+}
+
+export interface BindProjectArgs extends RevisionArgs {
+  project: ProjectBinding;
+}
+
+export interface EnrollArgs extends RevisionArgs {
+  assignment_id: string;
+  repository: string;
+  issue_number: number;
+  base_commit: string;
+  board_state: "READY" | string;
+  owner: string;
+  resources: string[];
+  dependencies: string[];
+  route: WorkerRoute;
+  requirements_fingerprint: string;
+  requirements_revision: number;
+}
+
+export interface ReviseArgs extends RevisionArgs {
+  assignment_id: string;
+  requirements_fingerprint?: string;
+  requirements_revision?: number;
+  [key: string]: unknown;
+}
+
+export interface PauseArgs extends RevisionArgs {
+  disable?: boolean;
+  reason?: string;
+}
+
+export interface ResumeArgs extends RevisionArgs {
+  reason?: string;
+}
+
+export interface AssignmentControlArgs extends RevisionArgs {
+  assignment_id: string;
+  reason?: string;
+}
+
+export interface ReviewArgs extends RevisionArgs {
+  assignment_id: string;
+  disposition: ReviewDisposition;
+  evidence: string[];
+}
+
+export type ControlArgsByOperation = {
+  bind_project: BindProjectArgs;
+  enroll: EnrollArgs;
+  revise: ReviseArgs;
+  pause: PauseArgs;
+  resume: ResumeArgs;
+  interrupt: AssignmentControlArgs;
+  cancel: AssignmentControlArgs;
+  review: ReviewArgs;
+};
+
+export type ControlArgs<O extends ControlOperation = ControlOperation> = O extends ControlOperation
+  ? ControlArgsByOperation[O]
+  : never;
+
+export interface ControlRequest<O extends ControlOperation = ControlOperation> {
   request_id: string;
-  operation: ControlOperation;
-  args: Record<string, unknown>;
+  operation: O;
+  args: ControlArgs<O>;
+}
+
+export interface ControlResponse<O extends ControlOperation = ControlOperation> {
+  operation: O;
+  [key: string]: unknown;
 }
 
 export class BridgeError extends Error {
@@ -50,18 +173,18 @@ export class ManagedClient {
     return new ManagedClient(config, await readToken(config));
   }
 
-  async state(): Promise<unknown> {
-    return this.request("/api/v1/managed/state", { method: "GET" });
+  async state(): Promise<ManagedState> {
+    return this.request("/api/v1/managed/state", { method: "GET" }) as Promise<ManagedState>;
   }
 
-  async events(after: number, waitMs: number, limit: number): Promise<unknown> {
+  async events(after: number, waitMs: number, limit: number): Promise<ManagedEvents> {
     if (!Number.isInteger(after) || after < 0) throw new BridgeError("events_after_invalid", "after must be a non-negative integer");
     if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 60_000) throw new BridgeError("events_wait_invalid", "wait_ms must be between 0 and 60000");
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new BridgeError("events_limit_invalid", "limit must be between 1 and 100");
-    return this.request(`/api/v1/managed/events?after=${after}&wait_ms=${waitMs}&limit=${limit}`, { method: "GET" });
+    return this.request(`/api/v1/managed/events?after=${after}&wait_ms=${waitMs}&limit=${limit}`, { method: "GET" }) as Promise<ManagedEvents>;
   }
 
-  async control(request: ControlRequest): Promise<unknown> {
+  async control<O extends ControlOperation>(request: ControlRequest<O>): Promise<ControlResponse<O>> {
     if (!request || typeof request.request_id !== "string" || request.request_id.trim() === "") {
       throw new BridgeError("request_id_invalid", "request_id must be a non-empty string");
     }
@@ -75,7 +198,7 @@ export class ManagedClient {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request)
-    });
+    }) as Promise<ControlResponse<O>>;
   }
 
   private async request(path: string, init: RequestInit): Promise<unknown> {

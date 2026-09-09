@@ -1,4 +1,5 @@
 import { validateConfig } from "./config.js";
+import { CheckoutError, prepareTrustedCheckout, type CheckoutOptions } from "./checkout.js";
 import { LifecycleError, diagnostics, pause, rollback, resume, setup, start, stop, uninstall, upgrade, type LifecycleOptions } from "./lifecycle.js";
 
 const usage = `Usage:
@@ -7,7 +8,8 @@ const usage = `Usage:
   codex-orchestration setup --executable PATH --workflow PATH [--version VERSION] [--port PORT]
   codex-orchestration start [setup options]
   codex-orchestration pause | resume | stop | rollback | uninstall
-  codex-orchestration upgrade --executable PATH [--version VERSION]`;
+  codex-orchestration upgrade --executable PATH [--version VERSION]
+  codex-orchestration checkout --input PATH [--policy PATH]`;
 
 function parseOptions(values: string[]): LifecycleOptions {
   const options: LifecycleOptions = {};
@@ -33,6 +35,22 @@ function parseOptions(values: string[]): LifecycleOptions {
   return options;
 }
 
+function parseCheckoutOptions(values: string[]): CheckoutOptions {
+  let inputFile: string | undefined;
+  let policyFile: string | undefined;
+  for (let index = 0; index < values.length; index += 1) {
+    const name = values[index];
+    if (name === "--help") throw new CheckoutError("usage", usage);
+    if (name !== "--input" && name !== "--policy") throw new CheckoutError("usage", `unknown option: ${name}`);
+    const value = values[++index];
+    if (!value || value.startsWith("--")) throw new CheckoutError("usage", `${name} requires a value`);
+    if (name === "--input") inputFile = value;
+    else policyFile = value;
+  }
+  if (!inputFile) throw new CheckoutError("usage", "checkout requires --input PATH");
+  return { inputFile, policyFile };
+}
+
 function print(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
@@ -46,6 +64,8 @@ try {
   } else if (command === "help") {
     console.log(usage);
     process.exitCode = 0;
+  } else if (command === "checkout") {
+    print(await prepareTrustedCheckout(parseCheckoutOptions(args)));
   } else {
     const options = parseOptions(args);
     if (command === "diagnostics") print(await diagnostics(options));
@@ -60,7 +80,7 @@ try {
     else throw new LifecycleError("usage", `unknown command: ${command}\n${usage}`);
   }
 } catch (error) {
-  const lifecycle = error instanceof LifecycleError ? error : new LifecycleError("lifecycle_error", "The orchestration lifecycle command failed");
+  const lifecycle = error instanceof LifecycleError || error instanceof CheckoutError ? error : new LifecycleError("lifecycle_error", "The orchestration lifecycle command failed");
   console.error(`${lifecycle.code}: ${lifecycle.message}`);
   process.exitCode = lifecycle.code === "usage" ? 2 : 1;
 }

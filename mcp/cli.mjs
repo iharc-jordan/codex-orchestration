@@ -148,13 +148,266 @@ var init_config = __esm({
 // src/cli.ts
 init_config();
 
-// src/lifecycle.ts
-import { access, chmod, copyFile, lstat, mkdir, readFile as readFile2, rename, rm, stat as stat2, writeFile } from "node:fs/promises";
-import { constants } from "node:fs";
+// src/checkout.ts
 import { execFile as nodeExecFile } from "node:child_process";
+import { lstat, mkdir, readFile as readFile2, readdir, realpath, rm } from "node:fs/promises";
+import { basename, dirname as dirname2, isAbsolute as isAbsolute2, relative, resolve as resolve3, sep } from "node:path";
 import { promisify } from "node:util";
+var execFile = promisify(nodeExecFile);
+var CONTEXT_MAX_BYTES = 16 * 1024;
+var INPUT_MAX_BYTES = 64 * 1024;
+var REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+var COMMIT_PATTERN = /^[0-9a-f]{40,64}$/i;
+var ATTEMPT_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+var CheckoutError = class extends Error {
+  code;
+  constructor(code, message) {
+    super(message);
+    this.name = "CheckoutError";
+    this.code = code;
+  }
+};
+function plainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function invalid(code, message) {
+  throw new CheckoutError(code, message);
+}
+function repositoryName(value) {
+  if (typeof value === "string") return value;
+  if (!plainObject(value)) return void 0;
+  for (const key of ["name_with_owner", "nameWithOwner", "full_name", "fullName"]) {
+    if (typeof value[key] === "string") return value[key];
+  }
+  return void 0;
+}
+function contextRepository(context) {
+  if (!plainObject(context.native_ref)) invalid("context_repository_missing", "issue context does not include a repository reference");
+  const nativeRef = context.native_ref;
+  const repository = repositoryName(nativeRef.repository) ?? repositoryName(nativeRef);
+  if (!repository || !REPOSITORY_PATTERN.test(repository)) invalid("context_repository_invalid", "issue context repository reference is invalid");
+  return repository;
+}
+function parseContext(raw) {
+  if (Buffer.byteLength(raw, "utf8") > CONTEXT_MAX_BYTES) invalid("context_too_large", "issue context exceeds 16384 bytes");
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    invalid("context_invalid", "issue context is not valid JSON");
+  }
+  if (!plainObject(value) || typeof value.id !== "string" || value.id.trim() === "" || typeof value.identifier !== "string" || value.identifier.trim() === "") {
+    invalid("context_invalid", "issue context must include id and identifier");
+  }
+  return { id: value.id, identifier: value.identifier, native_ref: value.native_ref };
+}
+function readIssueContext(raw = process.env.SYMPHONY_ISSUE_CONTEXT) {
+  if (!raw?.trim()) invalid("context_missing", "SYMPHONY_ISSUE_CONTEXT is required");
+  return parseContext(raw);
+}
+async function readJsonFile(path, maxBytes, code) {
+  let contents;
+  try {
+    contents = await readFile2(path);
+  } catch {
+    invalid(`${code}_unreadable`, "checkout input could not be read");
+  }
+  if (contents.byteLength > maxBytes) invalid(`${code}_too_large`, "checkout input exceeds its size limit");
+  try {
+    return JSON.parse(contents.toString("utf8"));
+  } catch {
+    invalid(`${code}_invalid`, "checkout input is not valid JSON");
+  }
+}
+function parseInput(value) {
+  if (!plainObject(value) || typeof value.assignment_id !== "string" || value.assignment_id.trim() === "" || typeof value.attempt_id !== "string" || value.attempt_id.trim() === "" || typeof value.base_commit !== "string" || typeof value.workspace !== "string") {
+    invalid("input_invalid", "checkout input must include assignment_id, attempt_id, base_commit, and workspace");
+  }
+  if (value.repository !== void 0 && typeof value.repository !== "string") invalid("input_invalid", "checkout repository must be a string");
+  if (!ATTEMPT_PATTERN.test(value.attempt_id)) invalid("input_invalid", "checkout attempt_id is invalid");
+  return {
+    assignment_id: value.assignment_id,
+    attempt_id: value.attempt_id,
+    repository: value.repository,
+    base_commit: value.base_commit,
+    workspace: value.workspace
+  };
+}
+function parseRemote(value) {
+  if (!plainObject(value) || typeof value.remote !== "string" || value.remote.trim() === "") invalid("policy_invalid", "repository policy must provide a remote");
+  const remote = value.remote.trim();
+  if (/\s|[\u0000-\u001f]/.test(remote)) invalid("policy_invalid", "repository policy remote is invalid");
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(remote)) {
+    try {
+      const parsed = new URL(remote);
+      if (!["https:", "ssh:", "file:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) invalid("policy_invalid", "repository policy remote is invalid");
+    } catch {
+      invalid("policy_invalid", "repository policy remote is invalid");
+    }
+  } else if (!/^git@[A-Za-z0-9._-]+:[^\s]+$/.test(remote)) {
+    invalid("policy_invalid", "repository policy remote is invalid");
+  }
+  return { remote };
+}
+function parsePolicy(value) {
+  if (!plainObject(value) || typeof value.workspace_root !== "string" || !isAbsolute2(value.workspace_root) || typeof value.control_root !== "string" || !isAbsolute2(value.control_root) || !plainObject(value.repositories)) {
+    invalid("policy_invalid", "checkout policy must include absolute control_root, workspace_root, and repositories");
+  }
+  const repositories = {};
+  for (const [name, repository] of Object.entries(value.repositories)) {
+    if (!REPOSITORY_PATTERN.test(name)) invalid("policy_invalid", "checkout policy contains an invalid repository name");
+    repositories[name.toLowerCase()] = parseRemote(repository);
+  }
+  if (Object.keys(repositories).length === 0) invalid("policy_invalid", "checkout policy must allow at least one repository");
+  return { control_root: value.control_root, workspace_root: value.workspace_root, repositories };
+}
+function inside(root, target) {
+  const path = relative(root, target);
+  return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute2(path);
+}
+async function resolveWorkspace(rootInput, workspaceInput) {
+  if (!isAbsolute2(workspaceInput) || workspaceInput.includes("\0")) invalid("workspace_invalid", "workspace must be an absolute path");
+  let root;
+  try {
+    root = await realpath(rootInput);
+  } catch {
+    invalid("workspace_root_invalid", "checkout workspace_root does not exist");
+  }
+  const rawWorkspace = resolve3(workspaceInput);
+  let workspace;
+  let exists;
+  try {
+    const details = await lstat(rawWorkspace);
+    if (details.isSymbolicLink()) invalid("workspace_invalid", "workspace must not be a symbolic link");
+    if (!details.isDirectory()) invalid("workspace_invalid", "workspace must be a directory");
+    workspace = await realpath(rawWorkspace);
+    exists = true;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    let parent;
+    try {
+      parent = await realpath(dirname2(rawWorkspace));
+    } catch {
+      invalid("workspace_invalid", "workspace parent does not exist");
+    }
+    workspace = resolve3(parent, basename(rawWorkspace));
+    exists = false;
+  }
+  if (!inside(root, workspace)) invalid("workspace_outside_root", "workspace is outside the trusted workspace_root");
+  if (!exists) {
+    const parent = dirname2(workspace);
+    if (!inside(root, parent) && parent !== root) invalid("workspace_outside_root", "workspace parent is outside the trusted workspace_root");
+  }
+  return { root, workspace, exists };
+}
+async function gitResult(args, cwd) {
+  try {
+    const result = await execFile("git", args, { cwd, encoding: "utf8", maxBuffer: 1048576, windowsHide: true });
+    return { code: 0, stdout: result.stdout.trim() };
+  } catch {
+    return { code: 1, stdout: "" };
+  }
+}
+async function git(args, cwd) {
+  const result = await gitResult(args, cwd);
+  if (result.code !== 0) invalid("git_failed", `git ${args[0] || "command"} failed`);
+  return result.stdout;
+}
+function sameRemote(actual, expected) {
+  return actual.trim().replace(/\/$/, "") === expected.trim().replace(/\/$/, "");
+}
+async function prepareExisting(workspace, remote) {
+  const entries = await readdir(workspace);
+  if (entries.length === 0) {
+    await git(["clone", "--no-checkout", "--origin", "origin", remote, workspace]);
+    return true;
+  }
+  if (await git(["rev-parse", "--is-inside-work-tree"], workspace) !== "true") invalid("workspace_invalid", "workspace is not a Git worktree");
+  const top = resolve3(await git(["rev-parse", "--show-toplevel"], workspace));
+  if (top !== resolve3(workspace)) invalid("workspace_invalid", "workspace is not the checkout root");
+  const actualRemote = await git(["remote", "get-url", "origin"], workspace);
+  if (!sameRemote(actualRemote, remote)) invalid("repository_mismatch", "workspace origin does not match the enrolled repository");
+  await git(["fetch", "--no-tags", "--prune", "origin"], workspace);
+  return false;
+}
+async function validateInputLocation(inputFile, policy, workspaceRoot) {
+  let controlRoot;
+  let inputPath;
+  let inputParent;
+  try {
+    controlRoot = await realpath(policy.control_root);
+    inputPath = resolve3(inputFile);
+    const details = await lstat(inputPath);
+    if (details.isSymbolicLink() || !details.isFile()) invalid("input_location_invalid", "checkout input must be a regular file");
+    inputParent = await realpath(dirname2(inputPath));
+  } catch {
+    invalid("input_location_invalid", "checkout input location could not be inspected");
+  }
+  if (!insideOrSelf(controlRoot, inputParent)) invalid("input_location_invalid", "checkout input is outside the trusted control_root");
+  if (insideOrSelf(workspaceRoot, inputParent)) invalid("input_location_invalid", "checkout input must be outside the worker workspace");
+}
+function insideOrSelf(root, target) {
+  return root === target || inside(root, target);
+}
+async function prepareTrustedCheckout(options) {
+  if (!options.inputFile?.trim()) invalid("input_missing", "checkout requires a per-attempt input file");
+  const context = readIssueContext(options.context);
+  const input = parseInput(await readJsonFile(options.inputFile, INPUT_MAX_BYTES, "input"));
+  const policyPath = options.policyFile?.trim() || process.env.CODEX_ORCHESTRATION_CHECKOUT_POLICY?.trim();
+  if (!policyPath) invalid("policy_missing", "checkout requires CODEX_ORCHESTRATION_CHECKOUT_POLICY or --policy");
+  const policy = parsePolicy(await readJsonFile(policyPath, INPUT_MAX_BYTES, "policy"));
+  const contextRepo = contextRepository(context);
+  if (input.assignment_id !== context.id) invalid("assignment_mismatch", "checkout assignment_id does not match issue context");
+  const repository = input.repository || contextRepo;
+  if (!REPOSITORY_PATTERN.test(repository)) invalid("repository_invalid", "repository must use OWNER/REPOSITORY form");
+  if (repository.toLowerCase() !== contextRepo.toLowerCase()) invalid("repository_mismatch", "checkout repository does not match issue context");
+  const configured = policy.repositories[repository.toLowerCase()];
+  if (!configured) invalid("repository_not_enrolled", "repository is not in the trusted checkout policy");
+  if (!COMMIT_PATTERN.test(input.base_commit)) invalid("base_commit_invalid", "base_commit must be a full Git commit SHA");
+  const workspace = await resolveWorkspace(policy.workspace_root, input.workspace);
+  await validateInputLocation(options.inputFile, policy, workspace.root);
+  let cloned = false;
+  try {
+    if (workspace.exists) {
+      cloned = await prepareExisting(workspace.workspace, configured.remote);
+    } else {
+      await mkdir(dirname2(workspace.workspace), { recursive: true });
+      await git(["clone", "--no-checkout", "--origin", "origin", configured.remote, workspace.workspace]);
+      cloned = true;
+    }
+    await git(["cat-file", "-e", `${input.base_commit}^{commit}`], workspace.workspace);
+    if (cloned) {
+      await git(["checkout", "--detach", "--force", input.base_commit], workspace.workspace);
+    } else {
+      const current = await git(["rev-parse", "HEAD"], workspace.workspace);
+      if (current.toLowerCase() !== input.base_commit.toLowerCase() && (await gitResult(["merge-base", "--is-ancestor", input.base_commit, current], workspace.workspace)).code !== 0) {
+        invalid("base_commit_mismatch", "existing checkout is not based on the enrolled base commit");
+      }
+    }
+    const head = await git(["rev-parse", "HEAD"], workspace.workspace);
+    if (cloned && head.toLowerCase() !== input.base_commit.toLowerCase()) invalid("checkout_failed", "checkout did not reach the requested base commit");
+  } catch (error) {
+    if (cloned) await rm(workspace.workspace, { recursive: true, force: true }).catch(() => void 0);
+    throw error;
+  }
+  return {
+    issue_id: context.id,
+    identifier: context.identifier,
+    assignment_id: input.assignment_id,
+    attempt_id: input.attempt_id,
+    repository,
+    base_commit: input.base_commit,
+    workspace: workspace.workspace
+  };
+}
+
+// src/lifecycle.ts
+import { access, chmod, copyFile, lstat as lstat2, mkdir as mkdir2, readFile as readFile3, rename, rm as rm2, stat as stat2, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { execFile as nodeExecFile2 } from "node:child_process";
+import { promisify as promisify2 } from "node:util";
 import { homedir as homedir2, platform as platform2 } from "node:os";
-import { dirname as dirname2, join as join2, resolve as resolve3, win32 as win322 } from "node:path";
+import { dirname as dirname3, join as join2, resolve as resolve4, win32 as win322 } from "node:path";
 import { randomBytes } from "node:crypto";
 
 // src/client.ts
@@ -280,7 +533,7 @@ var ManagedClient = class _ManagedClient {
 
 // src/lifecycle.ts
 init_paths();
-var execFile = promisify(nodeExecFile);
+var execFile2 = promisify2(nodeExecFile2);
 var SERVICE_NAME_PATTERN = /^[A-Za-z0-9_.@-]{1,80}$/;
 var RELEASE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 var DEFAULT_HOST = "127.0.0.1";
@@ -335,7 +588,7 @@ function lifecyclePaths(env = process.env, os = platform2()) {
   };
 }
 function hostPath(input) {
-  if (platform2() !== "win32" || !input.startsWith("/mnt/")) return resolve3(input);
+  if (platform2() !== "win32" || !input.startsWith("/mnt/")) return resolve4(input);
   const match = /^\/mnt\/([a-z])\/(.*)$/i.exec(input);
   if (!match) throw new LifecycleError("path_invalid", "WSL path must use a local mounted Windows drive");
   return win322.resolve(`${match[1].toUpperCase()}:\\${match[2].replaceAll("/", "\\")}`);
@@ -362,7 +615,7 @@ async function run(command, args, allowFailure = false, hostCommand = false) {
   const actualCommand = platform2() === "win32" && !hostCommand ? "wsl.exe" : command;
   const actualArgs = platform2() === "win32" && !hostCommand ? ["-d", "Ubuntu", "--", command, ...args] : args;
   try {
-    const result = await execFile(actualCommand, actualArgs, { windowsHide: true, maxBuffer: 1048576 });
+    const result = await execFile2(actualCommand, actualArgs, { windowsHide: true, maxBuffer: 1048576 });
     return { stdout: result.stdout, stderr: result.stderr, code: 0 };
   } catch (error) {
     if (allowFailure) {
@@ -376,11 +629,11 @@ async function runHost(command, args, allowFailure = false) {
   return run(command, args, allowFailure, true);
 }
 async function ensureDirectory(path) {
-  await mkdir(path, { recursive: true });
+  await mkdir2(path, { recursive: true });
   if (platform2() !== "win32") await chmod(path, 448);
 }
 async function writeAtomic(path, content, mode = 384) {
-  await ensureDirectory(dirname2(path));
+  await ensureDirectory(dirname3(path));
   const temp = `${path}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
   await writeFile(temp, content, { mode });
   if (platform2() !== "win32") await chmod(temp, mode);
@@ -388,7 +641,7 @@ async function writeAtomic(path, content, mode = 384) {
 }
 async function readOptional(path) {
   try {
-    return (await readFile2(path, "utf8")).trim() || void 0;
+    return (await readFile3(path, "utf8")).trim() || void 0;
   } catch (error) {
     if (error.code === "ENOENT") return void 0;
     throw new LifecycleError("read_failed", `could not read ${path}`);
@@ -484,13 +737,13 @@ async function readMetadata(paths) {
 async function unitOwnership(paths) {
   let details;
   try {
-    details = await lstat(paths.unit);
+    details = await lstat2(paths.unit);
   } catch (error) {
     if (error.code === "ENOENT") return "missing";
     throw new LifecycleError("unit_inspection_failed", `could not inspect service unit ${paths.unit}`);
   }
   if (!details.isFile() || details.isSymbolicLink()) return "foreign";
-  const content = await readFile2(paths.unit, "utf8");
+  const content = await readFile3(paths.unit, "utf8");
   const metadata = await readMetadata(paths);
   const expectedExec = `ExecStart=${unitQuote(servicePath(paths.wrapper))}`;
   return metadata.serviceName === paths.serviceName && content.includes("Description=Codex Orchestration managed Symphony") && content.includes(expectedExec) ? "owned" : "foreign";
@@ -542,7 +795,7 @@ async function writeBridgeConfig(paths, options) {
 }
 async function writeToken(paths, source) {
   if (await readOptional(paths.token)) return;
-  const value = source ? (await readFile2(hostPath(source), "utf8")).trim() : randomBytes(32).toString("hex");
+  const value = source ? (await readFile3(hostPath(source), "utf8")).trim() : randomBytes(32).toString("hex");
   if (!value) throw new LifecycleError("token_invalid", "token file is empty");
   await writeAtomic(paths.token, `${value}
 `);
@@ -638,11 +891,11 @@ async function managedControl(paths, operation, disable) {
 async function setup(options = {}) {
   applyOptions(options);
   const paths = lifecyclePaths(process.env, platform2());
-  for (const path of [paths.configRoot, paths.dataRoot, paths.stateRoot, paths.releasesRoot, paths.logsRoot, paths.journalRoot, paths.workspacesRoot, dirname2(paths.unit), dirname2(paths.wrapper)]) await ensureDirectory(path);
+  for (const path of [paths.configRoot, paths.dataRoot, paths.stateRoot, paths.releasesRoot, paths.logsRoot, paths.journalRoot, paths.workspacesRoot, dirname3(paths.unit), dirname3(paths.wrapper)]) await ensureDirectory(path);
   if (options.workflow) {
     const source = hostPath(options.workflow);
     await access(source, constants.R_OK);
-    await writeAtomic(paths.workflow, await readFile2(source, "utf8"));
+    await writeAtomic(paths.workflow, await readFile3(source, "utf8"));
   } else if (!await readOptional(paths.workflow)) {
     throw new LifecycleError("workflow_missing", `provide --workflow or create ${paths.workflow}`);
   }
@@ -650,7 +903,7 @@ async function setup(options = {}) {
   await writeBridgeConfig(paths, options);
   if (options.executable) await stageRelease(paths, options.executable, validateVersion(options.version));
   if (!await readOptional(paths.currentRelease)) throw new LifecycleError("release_missing", "provide --executable to install the first managed release");
-  await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile2(paths.bridgeConfig, "utf8")).port)), 448);
+  await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile3(paths.bridgeConfig, "utf8")).port)), 448);
   if (platform2() === "win32") {
     const metadata = await readMetadata(paths);
     if (metadata.serviceName === paths.serviceName && metadata.taskName) paths.taskName = metadata.taskName;
@@ -710,7 +963,7 @@ async function stop(options = {}) {
   const paths = lifecyclePaths(process.env, platform2());
   await applyStoredTaskName(paths);
   await managedControl(paths, "pause", true);
-  if (platform2() === "win32") await rm(paths.enabledMarker, { force: true });
+  if (platform2() === "win32") await rm2(paths.enabledMarker, { force: true });
   await run("systemctl", ["--user", "disable", "--now", paths.serviceName]);
   if (platform2() === "win32") await runHost("schtasks.exe", ["/Change", "/TN", paths.taskName, "/DISABLE"]);
   return paths;
@@ -722,7 +975,7 @@ async function upgrade(options) {
   await applyStoredTaskName(paths);
   const version = validateVersion(options.version);
   await stageRelease(paths, options.executable, version);
-  await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile2(paths.bridgeConfig, "utf8")).port)), 448);
+  await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile3(paths.bridgeConfig, "utf8")).port)), 448);
   await installUnit(paths);
   if (await serviceStatus(paths, "is-active")) await run("systemctl", ["--user", "restart", paths.serviceName]);
   return paths;
@@ -738,7 +991,7 @@ async function rollback(options = {}) {
 `);
   await writeAtomic(paths.previousRelease, `${current}
 `);
-  await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile2(paths.bridgeConfig, "utf8")).port)), 448);
+  await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile3(paths.bridgeConfig, "utf8")).port)), 448);
   await installUnit(paths);
   if (await serviceStatus(paths, "is-active")) await run("systemctl", ["--user", "restart", paths.serviceName]);
   return paths;
@@ -758,11 +1011,11 @@ async function uninstall(options = {}) {
     await removeOwnedUnitLink(paths);
   }
   if (task === "owned") {
-    await rm(paths.enabledMarker, { force: true });
+    await rm2(paths.enabledMarker, { force: true });
     await runHost("schtasks.exe", ["/Delete", "/TN", paths.taskName, "/F"], true);
   }
   if (owned) {
-    for (const path of [paths.unit, paths.wrapper, paths.launcher, paths.taskXml, paths.metadata]) await rm(path, { force: true });
+    for (const path of [paths.unit, paths.wrapper, paths.launcher, paths.taskXml, paths.metadata]) await rm2(path, { force: true });
     await run("systemctl", ["--user", "daemon-reload"], true);
   }
   return paths;
@@ -775,7 +1028,8 @@ var usage = `Usage:
   codex-orchestration setup --executable PATH --workflow PATH [--version VERSION] [--port PORT]
   codex-orchestration start [setup options]
   codex-orchestration pause | resume | stop | rollback | uninstall
-  codex-orchestration upgrade --executable PATH [--version VERSION]`;
+  codex-orchestration upgrade --executable PATH [--version VERSION]
+  codex-orchestration checkout --input PATH [--policy PATH]`;
 function parseOptions(values) {
   const options = {};
   for (let index = 0; index < values.length; index += 1) {
@@ -799,6 +1053,21 @@ function parseOptions(values) {
   if (options.serviceName) process.env.CODEX_ORCHESTRATION_SERVICE_NAME = options.serviceName;
   return options;
 }
+function parseCheckoutOptions(values) {
+  let inputFile;
+  let policyFile;
+  for (let index = 0; index < values.length; index += 1) {
+    const name = values[index];
+    if (name === "--help") throw new CheckoutError("usage", usage);
+    if (name !== "--input" && name !== "--policy") throw new CheckoutError("usage", `unknown option: ${name}`);
+    const value = values[++index];
+    if (!value || value.startsWith("--")) throw new CheckoutError("usage", `${name} requires a value`);
+    if (name === "--input") inputFile = value;
+    else policyFile = value;
+  }
+  if (!inputFile) throw new CheckoutError("usage", "checkout requires --input PATH");
+  return { inputFile, policyFile };
+}
 function print(value) {
   console.log(JSON.stringify(value, null, 2));
 }
@@ -811,6 +1080,8 @@ try {
   } else if (command === "help") {
     console.log(usage);
     process.exitCode = 0;
+  } else if (command === "checkout") {
+    print(await prepareTrustedCheckout(parseCheckoutOptions(args)));
   } else {
     const options = parseOptions(args);
     if (command === "diagnostics") print(await diagnostics(options));
@@ -826,7 +1097,7 @@ try {
 ${usage}`);
   }
 } catch (error) {
-  const lifecycle = error instanceof LifecycleError ? error : new LifecycleError("lifecycle_error", "The orchestration lifecycle command failed");
+  const lifecycle = error instanceof LifecycleError || error instanceof CheckoutError ? error : new LifecycleError("lifecycle_error", "The orchestration lifecycle command failed");
   console.error(`${lifecycle.code}: ${lifecycle.message}`);
   process.exitCode = lifecycle.code === "usage" ? 2 : 1;
 }
