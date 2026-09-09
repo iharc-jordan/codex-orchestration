@@ -21,6 +21,16 @@ rejects unsupported operation names and oversized requests before contacting the
 service. Review effects such as Project status changes and issue closure remain
 service-owned; the bridge only transports the control request and response.
 
+Supply `escalation_reason` alongside `route` for enrollment, or alongside `route`
+inside revision `changes`. The service requires it for every route above
+Luna/xhigh. `assignment_id` is the Project item node ID; native issue identity
+is verified separately so duplicate memberships cannot create duplicate owners.
+
+The same fixture is shipped as `elixir/test/fixtures/managed_control_fixture.json`
+in the pinned Symphony source. Its Elixir contract test applies the operation
+examples and route cases to the service rules; release validation compares the
+two copies.
+
 On Windows, the launcher runs the bundle in the configured Ubuntu WSL
 environment and resolves `node` from the login environment. If that environment
 does not provide the intended Linux runtime, set

@@ -16983,13 +16983,13 @@ function asBridgeError(error2) {
 // src/server.ts
 var controlOperations = ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"];
 var revisionProperty = { type: "integer", minimum: 0, description: "Current global or assignment revision required for compare-and-set." };
-var assignmentIdProperty = { type: "string", minLength: 1, description: "Underlying enrolled assignment identity." };
+var assignmentIdProperty = { type: "string", minLength: 1, description: "Project item node ID used as the assignment key; the service verifies underlying issue ownership separately." };
+var escalationReasonProperty = { type: "string", minLength: 1, description: "Required when selecting a route other than Luna/xhigh." };
 var routeProperty = {
   type: "object",
   properties: {
     model: { type: "string", enum: ["gpt-5.6-luna", "gpt-5.6-terra"] },
-    effort: { type: "string", enum: ["xhigh", "max"] },
-    reason: { type: "string", minLength: 1 }
+    effort: { type: "string", enum: ["xhigh", "max"] }
   },
   required: ["model", "effort"],
   additionalProperties: false
@@ -17020,6 +17020,9 @@ var operationArgSchemas = {
     properties: {
       expected_revision: revisionProperty,
       assignment_id: assignmentIdProperty,
+      project_item_id: { type: "string", minLength: 1 },
+      native_issue_id: { type: "string", minLength: 1 },
+      native_repository_id: { type: "string", minLength: 1 },
       repository: { type: "string", minLength: 1 },
       issue_number: { type: "integer", minimum: 1 },
       base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
@@ -17028,6 +17031,7 @@ var operationArgSchemas = {
       resources: { type: "array", items: { type: "string" } },
       dependencies: { type: "array", items: { type: "string" } },
       route: routeProperty,
+      escalation_reason: escalationReasonProperty,
       requirements_fingerprint: { type: "string", minLength: 1 },
       requirements_revision: { type: "integer", minimum: 0 }
     },
@@ -17044,6 +17048,7 @@ var operationArgSchemas = {
         properties: {
           base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
           route: routeProperty,
+          escalation_reason: escalationReasonProperty,
           resources: { type: "array", items: { type: "string" } },
           dependencies: { type: "array", items: { type: "string" } },
           requirements: { type: "object" },

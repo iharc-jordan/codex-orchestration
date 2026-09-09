@@ -7,7 +7,6 @@ export type ReviewDisposition = "accepted" | "rework" | "waiting" | "blocked";
 export interface WorkerRoute {
   model: string;
   effort: string;
-  reason?: string;
 }
 
 export interface ProjectBinding {
@@ -66,6 +65,9 @@ export interface BindProjectArgs extends RevisionArgs {
 
 export interface EnrollArgs extends RevisionArgs {
   assignment_id: string;
+  project_item_id?: string;
+  native_issue_id?: string;
+  native_repository_id?: string;
   repository: string;
   issue_number: number;
   base_commit: string;
@@ -74,6 +76,7 @@ export interface EnrollArgs extends RevisionArgs {
   resources: string[];
   dependencies: string[];
   route: WorkerRoute;
+  escalation_reason?: string;
   requirements_fingerprint: string;
   requirements_revision: number;
 }
