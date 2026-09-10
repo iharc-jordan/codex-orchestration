@@ -65,6 +65,13 @@ export interface BindProjectArgs extends RevisionArgs {
   project: ProjectBinding;
 }
 
+export interface ResourceReference {
+  kind: "repository" | "path" | "database" | "deployment" | "other";
+  authority: string;
+  identity: string;
+  access: "read" | "write";
+}
+
 export interface EnrollArgs extends RevisionArgs {
   project_id: string;
   assignment_id: string;
@@ -76,11 +83,11 @@ export interface EnrollArgs extends RevisionArgs {
   base_commit: string;
   board_state: "READY" | string;
   owner?: string;
-  resources: string[];
+  resources: ResourceReference[];
   dependencies: string[];
   route: WorkerRoute;
   escalation_reason?: string;
-  requirements_fingerprint: string;
+  requirements_fingerprint?: string;
   requirements_revision: number;
 }
 

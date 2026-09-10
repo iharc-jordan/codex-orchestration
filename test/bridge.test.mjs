@@ -189,7 +189,7 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   const operationRequirements = {
     orchestration_register_pm: [],
     orchestration_claim: ["project_id", "assignment_id", "expected_revision", "expected_ownership_revision"],
-    orchestration_enroll: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
+    orchestration_enroll: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_revision"],
     orchestration_revise: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "changes"],
     orchestration_pause: ["scope", "project_id", "assignments"],
     orchestration_resume: ["scope", "project_id", "assignments"],
@@ -210,6 +210,12 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   assert.equal(enrollSchema.escalation_reason.type, "string");
   assert.equal(enrollSchema.route.properties.reason, undefined);
   assert.equal(enrollSchema.native_issue_id.type, "string");
+  assert.equal(enrollSchema.resources.items.type, "object");
+  assert.deepEqual(enrollSchema.resources.items.required, ["kind", "authority", "identity", "access"]);
+  assert.deepEqual(enrollSchema.resources.items.properties.kind.enum, ["repository", "path", "database", "deployment", "other"]);
+  assert.deepEqual(enrollSchema.resources.items.properties.access.enum, ["read", "write"]);
+  assert.match(enrollSchema.requirements_fingerprint.description, /resolves this from GitHub when omitted/);
+  assert.deepEqual(listedTools.get("orchestration_revise").inputSchema.properties.args.properties.changes.properties.resources, enrollSchema.resources);
   assert.equal(listedTools.get("orchestration_revise").inputSchema.properties.args.properties.changes.properties.escalation_reason.type, "string");
 
   const state = await request(3, "tools/call", { name: "orchestration_state", arguments: {} });
@@ -231,6 +237,22 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   assert.deepEqual(writes[0].body, writes[1].body);
   assert.equal(writes[0].body.request_id, "pause-1");
   assert.equal(writes[0].body.args.assignments[0].expected_revision, 9);
+
+  const enrollment = {
+    request_id: "enroll-typed-resource",
+    args: {
+      expected_revision: 9, project_id: "project-1", assignment_id: "assignment-1",
+      repository: "example/repository", issue_number: 4, base_commit: "a".repeat(40),
+      board_state: "READY", requirements_revision: 1, dependencies: [],
+      resources: [{ kind: "repository", authority: "github.com", identity: "example/repository", access: "write" }],
+      route: { model: "gpt-5.6-luna", effort: "xhigh" }
+    }
+  };
+  const enrolled = await request(10, "tools/call", { name: "orchestration_enroll", _meta: metadata, arguments: enrollment });
+  assert.equal(enrolled.result.isError, undefined);
+  const forwardedEnrollment = upstream.seen.at(-1).body;
+  assert.deepEqual(forwardedEnrollment.args, enrollment.args);
+  assert.equal(Object.hasOwn(forwardedEnrollment.args, "requirements_fingerprint"), false);
 
   const stale = await request(8, "tools/call", { name: "orchestration_enroll", _meta: metadata, arguments: { request_id: "stale-1", args: { expected_revision: 8 } } });
   assert.equal(stale.result.isError, true);

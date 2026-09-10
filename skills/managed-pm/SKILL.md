@@ -34,6 +34,9 @@ when scope changes. Never use an old owner's authority after handoff.
 
 Pause/resume name an exact assignments list, each with assignment_id and both
 revision fences. Pause stops new dispatch while healthy active work finishes.
+Resume only removes that pause. After resolving a WAITING failure and reconciling
+its process, review with disposition rework returns both assignment and Project
+card to READY while retaining its workspace and thread.
 Handoff uses the same fenced list plus destination_pm_id and reason. The recipient
 must be registered. Handoff preserves a healthy worker and its attempt identity;
 it transfers PM responsibility. Unclaimed legacy state needs operator takeover.

@@ -26,8 +26,22 @@ const assignmentFenceSchema = {
 };
 const assignmentFencesProperty = { type: "array", minItems: 1, items: assignmentFenceSchema };
 const escalationReasonProperty = { type: "string", minLength: 1, description: "Required when selecting a route other than Luna/xhigh." };
-const requirementsFingerprintProperty = { type: "string", minLength: 1, description: "sha256: followed by the lowercase SHA-256 digest of the exact UTF-8 GitHub issue body. Exclude the title; preserve all whitespace and line endings." };
+const requirementsFingerprintProperty = { type: "string", minLength: 1, description: "Optional exact issue-body fingerprint. Symphony resolves this from GitHub when omitted and validates any supplied value; manual hashing is unnecessary." };
 const requirementsRevisionProperty = { type: "integer", minimum: 0, description: "Explicit PM material revision, distinct from the assignment revision; not parsed from issue text." };
+const resourcesProperty = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      kind: { type: "string", enum: ["repository", "path", "database", "deployment", "other"] },
+      authority: { type: "string", minLength: 1 },
+      identity: { type: "string", minLength: 1 },
+      access: { type: "string", enum: ["read", "write"] }
+    },
+    required: ["kind", "authority", "identity", "access"],
+    additionalProperties: false
+  }
+};
 const routeProperty = {
   type: "object",
   properties: {
@@ -93,14 +107,14 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
       base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
       board_state: { type: "string", enum: ["READY"] },
       owner: { type: "string", minLength: 1, description: "Legacy display metadata only; never used as PM authority." },
-      resources: { type: "array", items: { type: "string" } },
+      resources: resourcesProperty,
       dependencies: { type: "array", items: { type: "string" } },
       route: routeProperty,
       escalation_reason: escalationReasonProperty,
       requirements_fingerprint: requirementsFingerprintProperty,
       requirements_revision: requirementsRevisionProperty
     },
-    required: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
+    required: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_revision"],
     additionalProperties: true
   },
   revise: {
@@ -116,7 +130,7 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
           base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
           route: routeProperty,
           escalation_reason: escalationReasonProperty,
-          resources: { type: "array", items: { type: "string" } },
+          resources: resourcesProperty,
           dependencies: { type: "array", items: { type: "string" } },
           requirements: { type: "object" },
           requirements_fingerprint: requirementsFingerprintProperty,

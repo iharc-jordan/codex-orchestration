@@ -271,6 +271,9 @@ disposable plugin cache.
   a known matching execution checkpoint after resolving external effects.
 - Repeated transient failure reaches `WAITING` after two automatic retries.
   Diagnose the cause and use explicit review/revision controls for further work.
+  After the cause clears and the recorded process is reconciled, use review with
+  disposition `rework` to return the retained assignment and its Project card to
+  `READY`. Resume only removes a dispatch pause; it does not change `WAITING`.
 
 For an upgrade, pause and let healthy work reach review, then stop the service.
 Stage the new executable, update any changed private configuration, and start it.

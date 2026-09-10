@@ -17027,8 +17027,22 @@ var assignmentFenceSchema = {
 };
 var assignmentFencesProperty = { type: "array", minItems: 1, items: assignmentFenceSchema };
 var escalationReasonProperty = { type: "string", minLength: 1, description: "Required when selecting a route other than Luna/xhigh." };
-var requirementsFingerprintProperty = { type: "string", minLength: 1, description: "sha256: followed by the lowercase SHA-256 digest of the exact UTF-8 GitHub issue body. Exclude the title; preserve all whitespace and line endings." };
+var requirementsFingerprintProperty = { type: "string", minLength: 1, description: "Optional exact issue-body fingerprint. Symphony resolves this from GitHub when omitted and validates any supplied value; manual hashing is unnecessary." };
 var requirementsRevisionProperty = { type: "integer", minimum: 0, description: "Explicit PM material revision, distinct from the assignment revision; not parsed from issue text." };
+var resourcesProperty = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      kind: { type: "string", enum: ["repository", "path", "database", "deployment", "other"] },
+      authority: { type: "string", minLength: 1 },
+      identity: { type: "string", minLength: 1 },
+      access: { type: "string", enum: ["read", "write"] }
+    },
+    required: ["kind", "authority", "identity", "access"],
+    additionalProperties: false
+  }
+};
 var routeProperty = {
   type: "object",
   properties: {
@@ -17093,14 +17107,14 @@ var operationArgSchemas = {
       base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
       board_state: { type: "string", enum: ["READY"] },
       owner: { type: "string", minLength: 1, description: "Legacy display metadata only; never used as PM authority." },
-      resources: { type: "array", items: { type: "string" } },
+      resources: resourcesProperty,
       dependencies: { type: "array", items: { type: "string" } },
       route: routeProperty,
       escalation_reason: escalationReasonProperty,
       requirements_fingerprint: requirementsFingerprintProperty,
       requirements_revision: requirementsRevisionProperty
     },
-    required: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
+    required: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_revision"],
     additionalProperties: true
   },
   revise: {
@@ -17116,7 +17130,7 @@ var operationArgSchemas = {
           base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
           route: routeProperty,
           escalation_reason: escalationReasonProperty,
-          resources: { type: "array", items: { type: "string" } },
+          resources: resourcesProperty,
           dependencies: { type: "array", items: { type: "string" } },
           requirements: { type: "object" },
           requirements_fingerprint: requirementsFingerprintProperty,
