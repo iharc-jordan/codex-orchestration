@@ -17106,7 +17106,6 @@ var operationArgSchemas = {
       issue_number: { type: "integer", minimum: 1 },
       base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
       board_state: { type: "string", enum: ["READY"] },
-      owner: { type: "string", minLength: 1, description: "Legacy display metadata only; never used as PM authority." },
       resources: resourcesProperty,
       dependencies: { type: "array", items: { type: "string" } },
       route: routeProperty,
@@ -17400,12 +17399,13 @@ function runWindowsLauncher() {
 function resolveWslNode() {
   let output;
   try {
-    output = execFileSync("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lic", "node -p process.execPath"], {
+    output = execFileSync("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lc", "node -p process.execPath"], {
       encoding: "utf8",
-      windowsHide: true
+      windowsHide: true,
+      timeout: 1e4
     });
   } catch {
-    throw new Error("Could not resolve a Linux Node runtime in the Ubuntu WSL environment; set CODEX_ORCHESTRATION_WSL_NODE");
+    throw new Error("Ubuntu WSL did not resolve a Linux Node runtime within 10 seconds; check WSL startup or set CODEX_ORCHESTRATION_WSL_NODE");
   }
   const candidate = output.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^\/(?!mnt\/)[^\r\n]+\/node$/.test(line)).pop();
   if (!candidate) throw new Error("Ubuntu WSL did not return a Linux Node runtime; set CODEX_ORCHESTRATION_WSL_NODE");

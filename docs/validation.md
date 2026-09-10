@@ -15,7 +15,7 @@ process lifetime, configured installation, or an accepted real delivery.
 | Ownership | Exclusive resource conflicts serialize; active revision or route changes fence the old attempt; uncertain stops retain claims and workspaces. |
 | Recovery | Real worker and supervisor crashes; persisted blockers; damaged or unknown journal versions; duplicate instance rejection; explicit reconciliation before continuation. |
 | Conversation | Real same-thread continuation and exact thread resumption after confirmed process stop; missing history is explicit; interrupted turns are not replayed. |
-| Worker permissions | Actual allowed checkout writes and Git commit; denied control configuration/token/journal and sibling workspaces; absence of inherited PM controls and recursive delegation. |
+| Worker permissions | Configured host capabilities (CLI, MCP tools, apps, skills, network, and Docker); trusted PM controls authorize actions; declared resources and assignment scope are respected; recursive delegation is rejected. |
 | Process containment | Real command, PTY and background descendants stop within the owned service boundary; an unknown stop cannot authorize reassignment or cleanup. |
 | Routing and limits | Actual model/effort parameters, forbidden route rejection, explained escalation, transient retry exhaustion, durable total turns and usage accounting across resume. |
 | Service lifetime | MCP disconnect and caller exit leave authorized work running; hidden standard-user Windows keeper respects enabled state; explicit stop ends owned execution. |

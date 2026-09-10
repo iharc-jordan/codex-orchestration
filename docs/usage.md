@@ -1,27 +1,33 @@
-# Local service lifecycle
+# Managed MVP service lifecycle
 
-The published v1 pairing is plugin `v0.1.0` with Symphony runtime `v0.1.6`.
-The lifecycle commands below are the supported release procedure. The current
-checkout also contains an unreleased `v0.2.0` candidate; it has no public
-runtime artifact or production pilot, so use it only from a local checkout with
-a matching local Symphony build and disposable validation.
+These instructions cover the MVP: one Symphony scheduler, bounded assignments,
+PM-owned review/acceptance/release, and the native state and report paths.
+Workers execute on Linux with full access to the configured CLI, MCP tools, apps,
+skills, network, and Docker. Tool availability is capability rather than action
+authorization. Desktop-only worker parity and a new messaging service are out of
+scope. Keep one current assignment description and one current implementation
+path; remove superseded behavior instead of retaining parallel old/new paths.
+
+The local MVP pairing is plugin `v0.2.0` with Symphony runtime binary
+`0.2.0-mvp.1`. Use a Symphony executable built from the current managed-state version 2 source
+with this plugin. There is no public runtime artifact or production pilot; use
+the local checkout and the [fresh-task acceptance note](fresh-task-test.md).
 
 The shipped `mcp/cli.mjs` entrypoint manages the local Symphony executable and
 its host service. It does not install another Node, Codex, GitHub CLI, or
 scheduler.
 
-The first setup uses an explicit Symphony release executable and a private
-workflow file. Download the executable and `build-receipt.json` from the
-[pinned runtime release](https://github.com/iharc-jordan/symphony/releases/tag/v0.1.6)
-and compare its SHA256 with the receipt. On Linux, mark the downloaded file
-executable with `chmod +x symphony_linux_x86_64`. Windows users should place it
-in their Ubuntu WSL home and pass its Linux path to setup. Building from source
-is optional; see the [build instructions](release.md).
+The first setup uses an explicit Symphony executable built from the current
+managed-state version 2 source and a private workflow file. Set its application version to
+`0.2.0-mvp.1`; an older runtime or state format is incompatible. On Linux, mark
+the executable with `chmod +x symphony_linux_x86_64`. Windows users should place
+it in their Ubuntu WSL home and pass its Linux path to setup. See the
+[build instructions](release.md) for the local runtime build.
 Use the [generic workflow example](../fixtures/WORKFLOW.example.md) as a starting
 point and replace its paths and Project owner before setup:
 
 ```text
-node ./mcp/cli.mjs setup --executable /path/to/symphony_linux_x86_64 --workflow /path/to/WORKFLOW.md --version 0.1.6 --port 8787
+node ./mcp/cli.mjs setup --executable /path/to/symphony_linux_x86_64 --workflow /path/to/WORKFLOW.md --version 0.2.0-mvp.1 --port 8787
 ```
 
 Setup creates separate XDG configuration, data, and state roots. Configuration
@@ -31,9 +37,9 @@ the current release pointer, and an owned copy of the checkout helper. Setup
 installs the owned service assets but does not enable or resume execution.
 
 Run these commands from the installed plugin directory (reported by
-`codex plugin add --json`) or a checkout of its pinned source. Setup stages an
+`codex plugin add --json`) or this local checkout. Setup stages an
 immutable release label; use a new label when upgrading to a changed executable.
-The `local-2` label in the example below is a private staging label, not a
+The `0.2.0-mvp.1` label identifies the matching local runtime; it is not a
 published version.
 
 On Windows, setup delegates these Linux-owned roots and service operations to
@@ -50,7 +56,7 @@ node ./mcp/cli.mjs start
 node ./mcp/cli.mjs pause
 node ./mcp/cli.mjs resume
 node ./mcp/cli.mjs stop
-node ./mcp/cli.mjs upgrade --executable /path/to/new/bin/symphony --version local-2
+node ./mcp/cli.mjs upgrade --executable /path/to/new/bin/symphony --version 0.2.0-mvp.1
 node ./mcp/cli.mjs rollback
 node ./mcp/cli.mjs uninstall
 ```
@@ -110,10 +116,10 @@ The Windows launcher resolves Linux Node from the Ubuntu login environment. Set
 `CODEX_ORCHESTRATION_WSL_NODE` to an absolute WSL Node path when an explicit
 runtime is required.
 
-## Managed v2 candidate controls
+## Managed MVP controls
 
-The local candidate uses the same loopback endpoint and journal as v1 while
-adding authenticated PM ownership controls. Native PM tools are
+The local MVP uses the loopback endpoint and durable journal with authenticated
+PM ownership controls. Native PM tools are
 `orchestration_register_pm`, `orchestration_claim`, `orchestration_enroll`,
 `orchestration_revise`, `orchestration_pause`, `orchestration_resume`,
 `orchestration_interrupt`, `orchestration_cancel`, `orchestration_review`, and
@@ -153,12 +159,10 @@ ownership revision from managed state for subsequent controls.
 Pause/resume use a fenced `assignments` list. Handoff uses the same fences and
 names a registered `destination_pm_id`; it transfers PM responsibility while
 preserving a healthy worker's attempt identity. The recipient continues from
-the current assignment state. Legacy state marked `needs_claim` requires the
-operator's explicit `operator_takeover` control.
+the current assignment state.
 
-These controls are candidate behavior and are not covered by the published v1
-release receipt. Do not substitute a `v0.2.0` URL or claim production support
-until the real PM pilot and release checks have passed.
+These controls require the matching `0.2.0-mvp.1` Symphony build from current
+managed-state version 2 source. No public MVP artifact or production support is claimed.
 
 ## Trusted assignment checkout
 
@@ -222,11 +226,13 @@ location; it does not contain assignment state.
 | `managed.checkout_policy_file` | Private repository allowlist and workspace/control path policy. |
 | `managed.usage_limit_tokens` | Optional aggregate worker limit; further work stops when reported usage reaches it. |
 
-The validated Codex 0.153.4 managed profile disables worker network access.
-Prepare dependencies through a trusted `before_run` hook or a PM operation;
-GitHub access and checkout preparation run outside the worker turn. The named
-`symphony_worker` permission profile governs the turn, so changing only the
-legacy `turn_sandbox_policy.networkAccess` setting does not enable networking.
+Workers run on Linux with full access to the configured CLI, MCP tools, apps,
+skills, network, and Docker. This is a capability of the configured worker turn,
+not an authorization to expand the assignment or invoke PM controls: the current
+assignment, declared resources, and PM review still govern actions. Desktop-only
+worker parity is outside this MVP. Preserve host-side credential handling and
+do not put tokens in worker prompts, public workflow examples, repository files,
+or command arguments.
 
 Worker usage is measured from App Server telemetry. Updates can arrive late,
 and already running work can overshoot a cap. This limit does not include the

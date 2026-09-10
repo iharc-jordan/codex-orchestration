@@ -670,8 +670,15 @@ function delegatedOptionArgs(options) {
   return args;
 }
 async function resolveWslNode() {
-  const result = await runHost("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lic", "node -p process.execPath"], true);
-  if (result.code !== 0) throw new LifecycleError("wsl_node_missing", "could not resolve a Linux Node runtime in Ubuntu WSL");
+  let result;
+  try {
+    result = await execFile2("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lc", "node -p process.execPath"], {
+      windowsHide: true,
+      timeout: 1e4
+    });
+  } catch {
+    throw new LifecycleError("wsl_node_missing", "Ubuntu WSL did not resolve a Linux Node runtime within 10 seconds; check WSL startup");
+  }
   const candidate = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^\/(?!mnt\/)[^\r\n]+\/node$/.test(line)).pop();
   if (!candidate) throw new LifecycleError("wsl_node_missing", "Ubuntu WSL did not return a Linux Node runtime");
   return candidate;

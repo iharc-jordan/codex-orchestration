@@ -15,7 +15,7 @@ import { assertMcpEntrypoint, toWslPath } from "../dist/paths.js";
 const execFileAsync = promisify(execFile);
 
 async function resolveWslNode() {
-  const { stdout } = await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lic", "node -p process.execPath"]);
+  const { stdout } = await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lc", "node -p process.execPath"], { timeout: 10000 });
   const value = stdout.trim().split(/\r?\n/).filter(Boolean).pop();
   if (!value || !value.startsWith("/")) throw new Error("WSL login environment did not resolve a Linux Node runtime");
   return value;

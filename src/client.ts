@@ -82,7 +82,6 @@ export interface EnrollArgs extends RevisionArgs {
   issue_number: number;
   base_commit: string;
   board_state: "READY" | string;
-  owner?: string;
   resources: ResourceReference[];
   dependencies: string[];
   route: WorkerRoute;

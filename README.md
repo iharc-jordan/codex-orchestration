@@ -3,17 +3,12 @@
 A Codex plugin for an Astra PM working with a persistent pool of 5.6 workers,
 using OpenAI Symphony on Ubuntu and GitHub Projects for workflow state.
 
-**Published v1:** the `v0.1.0` plugin with the `v0.1.6` Symphony runtime has
-passed the recorded disposable installation, recovery, and bounded PM pilot.
-The pilot reached PM acceptance after source integration, CI, and live
-deployment verification. See the [delivery record](docs/implementation.md) for
-the evidence and limits.
-
-The current checkout also contains a `v0.2.0` managed-control candidate. It is
-local development work: no `v0.2.0` marketplace entry, release artifact, or
-real PM pilot has been published. Use the public v1 instructions below for the
-released profile; use the candidate only with a matching local Symphony build
-and disposable validation.
+This checkout contains the local managed MVP: plugin `v0.2.0` with Symphony
+runtime binary `0.2.0-mvp.1`. The runtime must be built from the current
+managed-state version 2 source and used with this plugin version; older runtime releases and
+state formats are not compatible with these instructions. There is no public
+marketplace entry or release artifact, and this README makes no PM pilot or
+model-performance claim.
 
 ## How it works
 
@@ -28,52 +23,31 @@ Codex PM -> plugin MCP bridge -> Symphony service -> Codex workers
                     +-- GitHub Projects and repository issues
 ```
 
-The published v1 profile supports one Project, one Ubuntu execution host, and
-two concurrent workers. Windows uses Ubuntu WSL2 for execution; native Ubuntu
-is also a supported target. Work stops for PM review before acceptance unlocks
-dependent assignments.
-
-The local v2 candidate extends the managed profile to multiple Projects and
-repositories. Each assignment has one responsible PM, with explicit handoff to
-another PM task, typed resource claims, and ownership revision fences. These
-candidate controls have local contract coverage; they are not release or pilot
-evidence.
+The MVP supports multiple Projects and repositories. Each assignment has one
+responsible PM, with explicit handoff to another PM task, typed resource claims,
+and ownership revision fences. Windows uses Ubuntu WSL2 for execution; native
+Ubuntu is also a supported target. Work stops for PM review before acceptance
+unlocks dependent assignments.
 
 ## Installation
 
-The public v1 distribution uses the pinned GitHub marketplace:
-
-```shell
-codex plugin marketplace add iharc-jordan/codex-orchestration --ref v0.1.0
-codex plugin add codex-orchestration@codex-orchestration
-```
-
-Download `symphony_linux_x86_64` and its build receipt from the matching
-[Symphony release](https://github.com/iharc-jordan/symphony/releases/tag/v0.1.6).
-The executable includes Erlang and the application dependencies; existing
-Codex, GitHub CLI, Node, Git, and systemd are still required. Follow the
-[setup instructions](docs/usage.md) to configure the service before enabling it.
-
-### From a local checkout
-
-The repository includes a marketplace entry pointing to the plugin at its root.
-From a local checkout:
+Install the plugin from this local checkout. The current MVP requires a
+matching Symphony build from the current managed-state version 2 source and runtime binary
+version `0.2.0-mvp.1`:
 
 ```shell
 codex plugin marketplace add /path/to/codex-orchestration
 codex plugin add codex-orchestration@codex-orchestration
 ```
 
-For an existing personal marketplace entry, use its own marketplace name instead:
+Build or obtain that matching executable before setup. The executable includes
+its runtime dependencies; existing Codex, GitHub CLI, Node, Git, and systemd
+are still required. Follow the [setup instructions](docs/usage.md) to configure
+the service before enabling it.
 
-```shell
-codex plugin add codex-orchestration@personal
-```
-
-This local-checkout path is also how the unreleased `v0.2.0` candidate is
-tested. It does not turn the candidate into a public release. Pair it with the
-matching local Symphony source and private workflow, and do not use a
-`v0.2.0` marketplace or runtime-release URL because none has been published.
+For an existing personal marketplace entry, use its own marketplace name
+instead. The local checkout remains required because no public MVP artifact has
+been published.
 
 Open a fresh Codex task to discover the installed tools. Call
 `orchestration_diagnostics` to check bridge configuration. A missing configuration
@@ -101,9 +75,9 @@ service disables further work. Uninstall preserves configuration and user work.
 Sleep, shutdown, and explicit WSL termination require recovery; they are not
 continuous-execution guarantees.
 
-## Managed v2 candidate contract
+## Managed MVP contract
 
-The candidate exposes ten native PM operations through the bridge:
+The MVP exposes ten native PM operations through the bridge:
 `register_pm`, `claim`, `enroll`, `revise`, `pause`, `resume`, `interrupt`,
 `cancel`, `review`, and `handoff`. The operator CLI adds `bind_project`,
 service pause/resume, and `operator_takeover`. The bridge does not add a second
@@ -136,7 +110,7 @@ current assignment and attempt.
 - [Downstream changes and validation](docs/implementation.md)
 - [Third-party notices for the bundled bridge](THIRD_PARTY_NOTICES.md)
 
-The plugin is licensed under [Apache-2.0](LICENSE). Symphony retains its upstream
-license and attribution. The
-[managed Symphony source](https://github.com/iharc-jordan/symphony/tree/orchestration/integration)
-and its release receipt identify the exact runtime used with this plugin.
+The plugin is licensed under [Apache-2.0](LICENSE). The
+[Symphony source](https://github.com/iharc-jordan/symphony) retains its upstream
+license and attribution. The local build receipt identifies the exact runtime
+source revision used with this plugin.
