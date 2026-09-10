@@ -24,7 +24,7 @@ test("managed contract fixture covers the typed bridge envelope without private 
     cursor: 0,
     paused: false,
     disabled: false,
-    binding: null,
+    projects: {},
     assignments: {}
   });
   assert.deepEqual(http.events.response, { after: 0, events: [], cursor: 0 });
