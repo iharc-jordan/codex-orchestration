@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { resolve, win32 } from "node:path";
 
 export function toWslPath(input: string): string {
@@ -19,5 +20,22 @@ export function fromWslPath(input: string): string {
 }
 
 export function resolvedScriptPath(input: string | undefined): string {
-  return toWslPath(input ?? resolve("mcp/server.mjs"));
+  return toWslPath(assertMcpEntrypoint(input));
+}
+
+export function assertMcpEntrypoint(input: string | undefined): string {
+  const candidate = input ?? resolve("mcp/server.mjs");
+  const hostPath = /^\/mnt\/[A-Za-z]\//.test(candidate)
+    ? fromWslPath(candidate)
+    : /^[A-Za-z]:[\\/]/.test(candidate)
+      ? win32.resolve(candidate)
+      : resolve(candidate);
+  let details;
+  try {
+    details = statSync(hostPath);
+  } catch {
+    throw new Error(`MCP server entrypoint is missing from the installed plugin package: ${hostPath}. Reinstall the plugin package or refresh its installation.`);
+  }
+  if (!details.isFile()) throw new Error(`MCP server entrypoint is not a regular file: ${hostPath}. Reinstall the plugin package or refresh its installation.`);
+  return hostPath;
 }

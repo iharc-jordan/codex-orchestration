@@ -32,6 +32,7 @@ export interface LifecyclePaths {
   lock: string;
   unit: string;
   launcher: string;
+  helper: string;
   taskXml: string;
   metadata: string;
   enabledMarker: string;
@@ -101,6 +102,7 @@ export function lifecyclePaths(env: NodeJS.ProcessEnv = process.env, os = platfo
     lock: join(stateRoot, "managed.lock"),
     unit: join(unitRoot, serviceName.endsWith(".service") ? serviceName : `${serviceName}.service`),
     launcher: join(dataRoot, "bin", "windows-launcher.ps1"),
+    helper: join(dataRoot, "bin", "checkout-helper.mjs"),
     taskXml: join(dataRoot, "bin", "windows-task.xml"),
     metadata: join(dataRoot, "installation.json"),
     enabledMarker: join(stateRoot, "service-enabled"),
@@ -281,6 +283,64 @@ function validateVersion(version: string | undefined): string {
   const value = version?.trim() || `local-${Date.now()}`;
   if (!RELEASE_PATTERN.test(value)) throw new LifecycleError("version_invalid", "version must contain only letters, numbers, dots, underscores, and hyphens");
   return value;
+}
+
+function bundledHelperSource(): string {
+  const entrypoint = process.argv[1];
+  if (entrypoint && /(?:^|[\\/])mcp[\\/]cli\.mjs$/i.test(entrypoint)) return hostPath(entrypoint);
+  return resolve("mcp/cli.mjs");
+}
+
+async function stageCheckoutHelper(paths: LifecyclePaths): Promise<void> {
+  const source = bundledHelperSource();
+  let details;
+  try {
+    details = await stat(source);
+    await access(source, constants.R_OK);
+  } catch {
+    throw new LifecycleError("helper_invalid", `bundled checkout helper is not readable: ${source}`);
+  }
+  if (!details.isFile()) throw new LifecycleError("helper_invalid", `bundled checkout helper is not a regular file: ${source}`);
+  const temporary = `${paths.helper}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
+  try {
+    await copyFile(source, temporary);
+    if (platform() !== "win32") await chmod(temporary, 0o700);
+    await rename(temporary, paths.helper);
+  } catch {
+    await rm(temporary, { force: true });
+    throw new LifecycleError("helper_stage_failed", `could not stage the checkout helper at ${paths.helper}`);
+  }
+}
+
+function rewriteCheckoutHelperPath(content: string, helperPath: string): string {
+  const linePattern = /^([ \t]*checkout_helper_path:)[ \t]*(?:(?:"(?:\\.|[^"\r\n])*")|(?:'(?:''|[^'\r\n])*')|(?:[^#\r\n]*?))([ \t]*(?:#.*))?(\r?\n|$)/gm;
+  let replaced = false;
+  const result = content.replace(linePattern, (_match, prefix: string, suffix = "", end: string) => {
+    replaced = true;
+    return `${prefix} ${JSON.stringify(helperPath)}${suffix}${end}`;
+  });
+  return replaced ? result : content;
+}
+
+async function readWorkflow(paths: LifecyclePaths, options: LifecycleOptions): Promise<string> {
+  if (options.workflow) {
+    const source = hostPath(options.workflow);
+    try {
+      await access(source, constants.R_OK);
+      return await readFile(source, "utf8");
+    } catch {
+      throw new LifecycleError("workflow_invalid", `workflow is not readable: ${source}`);
+    }
+  }
+  try {
+    const existing = await readFile(paths.workflow, "utf8");
+    if (!existing.trim()) throw new LifecycleError("workflow_missing", `provide --workflow or create ${paths.workflow}`);
+    return existing;
+  } catch (error) {
+    if (error instanceof LifecycleError) throw error;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new LifecycleError("workflow_missing", `provide --workflow or create ${paths.workflow}`);
+    throw new LifecycleError("workflow_invalid", `workflow is not readable: ${paths.workflow}`);
+  }
 }
 
 async function validateExecutable(input: string): Promise<string> {
@@ -561,17 +621,13 @@ export async function setup(options: LifecycleOptions = {}): Promise<LifecyclePa
   if (platform() === "win32") return setupWindows(options);
   const paths = lifecyclePaths(process.env, platform());
   for (const path of [paths.configRoot, paths.dataRoot, paths.stateRoot, paths.releasesRoot, paths.logsRoot, paths.journalRoot, paths.workspacesRoot, dirname(paths.unit), dirname(paths.wrapper)]) await ensureDirectory(path);
-  if (options.workflow) {
-    const source = hostPath(options.workflow);
-    await access(source, constants.R_OK);
-    await writeAtomic(paths.workflow, await readFile(source, "utf8"));
-  } else if (!(await readOptional(paths.workflow))) {
-    throw new LifecycleError("workflow_missing", `provide --workflow or create ${paths.workflow}`);
-  }
+  const workflow = await readWorkflow(paths, options);
   await writeToken(paths, options.tokenFile);
   await writeBridgeConfig(paths, options);
   if (options.executable) await stageRelease(paths, options.executable, validateVersion(options.version));
   if (!(await readOptional(paths.currentRelease))) throw new LifecycleError("release_missing", "provide --executable to install the first managed release");
+  await stageCheckoutHelper(paths);
+  await writeAtomic(paths.workflow, rewriteCheckoutHelperPath(workflow, paths.helper));
   await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile(paths.bridgeConfig, "utf8")).port)), 0o700);
   if (platform() === "win32") {
     const metadata = await readMetadata(paths);
@@ -603,7 +659,7 @@ export async function diagnostics(options: LifecycleOptions = {}): Promise<Recor
     valid: config.valid,
     config,
     service: { name: paths.serviceName, active: await serviceStatus(paths, "is-active"), enabled: await serviceStatus(paths, "is-enabled") },
-    paths: { config: paths.bridgeConfig, workflow: paths.workflow, data: paths.dataRoot, state: paths.stateRoot, journal: paths.journalRoot, workspaces: paths.workspacesRoot, lock: paths.lock, unit: paths.unit },
+    paths: { config: paths.bridgeConfig, workflow: paths.workflow, helper: paths.helper, data: paths.dataRoot, state: paths.stateRoot, journal: paths.journalRoot, workspaces: paths.workspacesRoot, lock: paths.lock, unit: paths.unit },
     release: await readOptional(paths.currentRelease),
     previousRelease: await readOptional(paths.previousRelease),
     task: platform() === "win32" ? paths.taskName : undefined
@@ -677,6 +733,8 @@ export async function upgrade(options: LifecycleOptions): Promise<LifecyclePaths
   await applyStoredTaskName(paths);
   const version = validateVersion(options.version);
   await stageRelease(paths, options.executable, version);
+  await stageCheckoutHelper(paths);
+  await writeAtomic(paths.workflow, rewriteCheckoutHelperPath(await readWorkflow(paths, {}), paths.helper));
   await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile(paths.bridgeConfig, "utf8")).port)), 0o700);
   await installUnit(paths);
   if (await serviceStatus(paths, "is-active")) await run("systemctl", ["--user", "restart", paths.serviceName]);

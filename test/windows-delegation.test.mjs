@@ -63,11 +63,13 @@ test("Windows lifecycle delegates service state to WSL and keeps only the host k
   assert.match(paths.launcher, /^[A-Za-z]:\\/);
   assert.match(paths.taskXml, /^[A-Za-z]:\\/);
   assert.match(paths.metadata, /^[A-Za-z]:\\/);
+  assert.match(paths.helper, /\/checkout-helper\.mjs$/);
   const launcher = await readFile(paths.launcher, "utf8");
   assert.match(launcher, /wsl\.exe -d Ubuntu -- test -f/);
   assert.doesNotMatch(launcher, /Test-Path/);
   const config = JSON.parse((await wsl(["cat", `${root}/config/config.json`])).stdout);
   assert.equal(config.token_file, `${root}/config/token`);
+  await wsl(["test", "-f", paths.helper]);
   await access(paths.metadata);
 
   await wsl(["mkdir", "-p", secondRoot]);

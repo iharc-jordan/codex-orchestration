@@ -20,9 +20,9 @@ node ./mcp/cli.mjs setup --executable /path/to/symphony_linux_x86_64 --workflow 
 
 Setup creates separate XDG configuration, data, and state roots. Configuration
 contains `config.json`, `token`, and the private `WORKFLOW.md`; state contains
-the managed lock, journal, logs, and workspaces; data contains staged releases
-and the current release pointer. Setup installs the owned service assets but
-does not enable or resume execution.
+the managed lock, journal, logs, and workspaces; data contains staged releases,
+the current release pointer, and an owned copy of the checkout helper. Setup
+installs the owned service assets but does not enable or resume execution.
 
 Run these commands from the installed plugin directory (reported by
 `codex plugin add --json`) or a checkout of its pinned source. Setup stages an
@@ -160,7 +160,7 @@ location; it does not contain assignment state.
 | `managed.journal_path` | Private durable execution journal path. |
 | `managed.control_token_file` | Private non-empty bearer-token file also used by the bridge. |
 | `managed.checkout_node` | Existing Linux Node executable. |
-| `managed.checkout_helper_path` | Installed plugin's pinned `mcp/cli.mjs` path. |
+| `managed.checkout_helper_path` | Setup rewrites this to the owned checkout-helper copy under the stable data root. |
 | `managed.checkout_policy_file` | Private repository allowlist and workspace/control path policy. |
 | `managed.usage_limit_tokens` | Optional aggregate worker limit; further work stops when reported usage reaches it. |
 
@@ -185,8 +185,9 @@ Protect the private configuration root with owner-only permissions.
 For custom roots, pass `--root` consistently to lifecycle commands and point the
 bridge at that root's Linux `config/config.json` using
 `CODEX_ORCHESTRATION_CONFIG`. Update the workflow's journal, token, checkout and
-workspace paths to match. A plugin upgrade must keep the old helper available
-until the service workflow points at the new installed helper.
+workspace paths to match. Setup and upgrade copy the helper into the stable data
+root before writing the workflow path, so the service does not depend on a
+disposable plugin cache.
 
 ## Recovery and troubleshooting
 

@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { asBridgeError, BridgeError, ControlArgs, ControlOperation, ManagedClient } from "./client.js";
 import { validateConfig } from "./config.js";
-import { resolvedScriptPath, toWslPath } from "./paths.js";
+import { assertMcpEntrypoint, resolvedScriptPath, toWslPath } from "./paths.js";
 
 const controlOperations: ControlOperation[] = ["register_pm", "claim", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review", "handoff"];
 const operatorOnlyOperations = new Set<ControlOperation>(["bind_project", "operator_takeover"]);
@@ -342,7 +342,8 @@ async function runBridge(): Promise<void> {
 }
 
 function runWindowsLauncher(): void {
-  const script = resolvedScriptPath(process.argv[1]);
+  const hostScript = assertMcpEntrypoint(process.argv[1]);
+  const script = resolvedScriptPath(hostScript);
   const configuredNode = process.env.CODEX_ORCHESTRATION_WSL_NODE?.trim();
   const wslNode = configuredNode || resolveWslNode();
   const environment = { ...process.env };
@@ -357,16 +358,46 @@ function runWindowsLauncher(): void {
     windowsHide: true,
     env: environment
   });
-  const forwardSignal = (signal: NodeJS.Signals) => {
-    if (!child.killed) child.kill(signal);
+  let shuttingDown = false;
+  let forceKillTimer: NodeJS.Timeout | undefined;
+  const forceKill = () => {
+    if (child.exitCode !== null || !child.pid) return;
+    const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true
+    });
+    killer.once("error", () => undefined);
+    killer.unref();
   };
-  process.once("SIGINT", () => forwardSignal("SIGINT"));
-  process.once("SIGTERM", () => forwardSignal("SIGTERM"));
-  process.once("exit", () => {
-    if (!child.killed) child.kill("SIGTERM");
+  const shutdown = (signal: NodeJS.Signals = "SIGTERM") => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (child.exitCode !== null) return;
+    try {
+      if (!child.kill(signal)) {
+        forceKill();
+        return;
+      }
+    } catch {
+      forceKill();
+      return;
+    }
+    forceKillTimer = setTimeout(forceKill, 2000);
+    forceKillTimer.unref();
+  };
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.stdin.once("end", () => shutdown());
+  process.stdin.once("close", () => shutdown());
+  child.once("error", (error) => {
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+    process.stderr.write(`codex-orchestration: could not start the Ubuntu MCP bridge: ${error.message}\n`);
+    process.exitCode = 1;
   });
   child.once("close", (code) => {
+    if (forceKillTimer) clearTimeout(forceKillTimer);
     process.exitCode = code ?? 1;
+    process.stdin.pause();
   });
 }
 
@@ -385,5 +416,13 @@ function resolveWslNode(): string {
   return candidate;
 }
 
-if (process.platform === "win32") runWindowsLauncher();
+if (process.platform === "win32") {
+  try {
+    runWindowsLauncher();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "could not start the Windows MCP bridge";
+    process.stderr.write(`codex-orchestration: ${message}\n`);
+    process.exitCode = 1;
+  }
+}
 else await runBridge();

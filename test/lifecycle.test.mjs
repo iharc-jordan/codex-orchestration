@@ -68,11 +68,14 @@ test("disposable lifecycle installs, upgrades, rolls back, stops, and uninstalls
   const root = `/tmp/Codex Orchestration lifecycle ${process.pid}-${Date.now()}`;
   const service = `codex-orchestration-test-${process.pid}`;
   const fake = `${root}/input/symphony`;
+  const workflow = `${root}/input/WORKFLOW.md`;
+  const retiredHelper = `${root}/retired-plugin/mcp/cli.mjs`;
   const options = ["--root", root, "--service-name", service];
   let installed = false;
   let uninstalled = false;
   await wslCommand(["mkdir", "-p", `${root}/input`]);
   await writeWslFile(node, fake, fakeSymphony, "755");
+  await writeWslFile(node, workflow, `managed:\n  checkout_helper_path: ${retiredHelper}\n`, "600");
   t.after(async () => {
     if (installed && !uninstalled) {
       await wslCommand(["systemctl", "--user", "disable", "--now", `${service}.service`]);
@@ -81,9 +84,17 @@ test("disposable lifecycle installs, upgrades, rolls back, stops, and uninstalls
     await wslCommand(["systemctl", "--user", "daemon-reload"]);
   });
 
-  const setup = JSON.parse((await runCli(node, ["setup", ...options, "--executable", fake, "--workflow", "/etc/hosts", "--version", "r1", "--port", "18991"])).stdout);
+  const setup = JSON.parse((await runCli(node, ["setup", ...options, "--executable", fake, "--workflow", workflow, "--version", "r1", "--port", "18991"])).stdout);
   installed = true;
   assert.match(setup.wrapper, /Codex Orchestration lifecycle/);
+  assert.match(setup.helper, /checkout-helper\.mjs$/);
+  const stagedHelper = await wslCommand(["cat", setup.helper]);
+  assert.match(stagedHelper.stdout, /codex-orchestration/);
+  const installedWorkflow = await wslCommand(["cat", setup.workflow]);
+  assert.ok(installedWorkflow.stdout.includes(`checkout_helper_path: "${setup.helper}"`));
+  assert.ok(!installedWorkflow.stdout.includes(retiredHelper));
+  await wslCommand(["rm", "-rf", `${root}/retired-plugin`]);
+  await wslCommand(["test", "-f", setup.helper]);
   const unit = await wslCommand(["cat", setup.unit]);
   assert.match(unit.stdout, /flock|KillMode=control-group/);
   const wrapper = await wslCommand(["cat", setup.wrapper]);

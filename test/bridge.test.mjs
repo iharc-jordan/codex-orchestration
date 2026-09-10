@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 import { ManagedClient, derivePmCredential } from "../dist/client.js";
 import { validateConfig } from "../dist/config.js";
-import { toWslPath } from "../dist/paths.js";
+import { assertMcpEntrypoint, toWslPath } from "../dist/paths.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -243,6 +243,23 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   assert.doesNotMatch(unauthorized.result.content[0].text, new RegExp(token));
 });
 
+test("Windows launcher closes its owned WSL child when MCP input reaches EOF", { skip: process.platform !== "win32" }, async (t) => {
+  const child = spawn(process.execPath, [join(process.cwd(), "mcp/server.mjs")], {
+    cwd: process.cwd(),
+    env: { ...process.env, CODEX_ORCHESTRATION_CONFIG: "C:\\codex-orchestration-missing\\config.json" },
+    stdio: ["pipe", "ignore", "pipe"]
+  });
+  t.after(() => {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  });
+  child.stdin.end();
+  const closed = await Promise.race([
+    once(child, "close"),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Windows launcher did not close its WSL child after stdin EOF")), 10_000))
+  ]);
+  assert.equal(Array.isArray(closed), true);
+});
+
 test("client rejects redirects, handles IPv6 loopback, bounds responses, and redacts error codes", async (t) => {
   const token = "fixture-secret-token";
   const upstream = await startFixture(token);
@@ -411,4 +428,16 @@ test("operator CLI sends a private control envelope once with the install creden
   assert.equal(rejected.code, 1);
   assert.match(rejected.stderr, /operator_required/);
   assert.equal(upstream.seen.filter((entry) => entry.method === "POST").length, 1);
+});
+
+test("MCP launcher reports a retired package entrypoint clearly", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-orchestration-retired-package-"));
+  const missing = join(root, "mcp", "server.mjs");
+  try {
+    assert.throws(() => assertMcpEntrypoint(missing), /entrypoint is missing from the installed plugin package/);
+    await writeFile(join(root, "directory-entrypoint"), "placeholder");
+    assert.throws(() => assertMcpEntrypoint(root), /entrypoint is not a regular file/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
