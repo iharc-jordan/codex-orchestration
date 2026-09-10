@@ -82,10 +82,14 @@ example, a service pause is:
   "operation": "pause",
   "args": {
     "scope": "service",
+    "expected_revision": 12,
     "reason": "planned maintenance"
   }
 }
 ```
+
+Replace `12` with the current managed control revision returned by the state
+endpoint before submitting the envelope.
 
 The CLI accepts only `bind_project`, service-scoped `pause` or `resume`, and
 `operator_takeover`. It reads the file once, loads the operator credential from
