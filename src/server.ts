@@ -338,6 +338,9 @@ async function runBridge(): Promise<void> {
     }
   });
 
+  // The process belongs to this stdio connection. An outstanding HTTP request
+  // must not keep an orphaned bridge alive after its Codex caller disconnects.
+  server.onclose = () => process.exit(0);
   await server.connect(new StdioServerTransport());
 }
 
@@ -354,7 +357,7 @@ function runWindowsLauncher(): void {
   const forwardedEnvironment = ["CODEX_ORCHESTRATION_CONFIG", "XDG_CONFIG_HOME"]
     .flatMap((name) => environment[name] ? [`${name}=${environment[name]}`] : []);
   const child = spawn("wsl.exe", ["-d", "Ubuntu", "--", "env", ...forwardedEnvironment, wslNode, script, ...process.argv.slice(2)], {
-    stdio: "inherit",
+    stdio: ["pipe", "inherit", "inherit"],
     windowsHide: true,
     env: environment
   });
@@ -369,26 +372,21 @@ function runWindowsLauncher(): void {
     killer.once("error", () => undefined);
     killer.unref();
   };
-  const shutdown = (signal: NodeJS.Signals = "SIGTERM") => {
+  const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
     if (child.exitCode !== null) return;
-    try {
-      if (!child.kill(signal)) {
-        forceKill();
-        return;
-      }
-    } catch {
-      forceKill();
-      return;
-    }
+    process.stdin.unpipe(child.stdin);
+    child.stdin.end();
     forceKillTimer = setTimeout(forceKill, 2000);
     forceKillTimer.unref();
   };
-  process.once("SIGINT", () => shutdown("SIGINT"));
-  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
   process.stdin.once("end", () => shutdown());
   process.stdin.once("close", () => shutdown());
+  child.stdin.on("error", () => shutdown());
+  process.stdin.pipe(child.stdin);
   child.once("error", (error) => {
     if (forceKillTimer) clearTimeout(forceKillTimer);
     process.stderr.write(`codex-orchestration: could not start the Ubuntu MCP bridge: ${error.message}\n`);

@@ -244,20 +244,32 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
 });
 
 test("Windows launcher closes its owned WSL child when MCP input reaches EOF", { skip: process.platform !== "win32" }, async (t) => {
+  const configMarker = `/tmp/orchestration-eof-${process.pid}-${Date.now()}.json`;
+  const wslNode = await resolveWslNode();
   const child = spawn(process.execPath, [join(process.cwd(), "mcp/server.mjs")], {
     cwd: process.cwd(),
-    env: { ...process.env, CODEX_ORCHESTRATION_CONFIG: "C:\\codex-orchestration-missing\\config.json" },
-    stdio: ["pipe", "ignore", "pipe"]
+    env: { ...process.env, CODEX_ORCHESTRATION_CONFIG: configMarker },
+    stdio: ["pipe", "pipe", "pipe"]
   });
   t.after(() => {
     if (child.exitCode === null) child.kill("SIGKILL");
   });
+  const request = readJsonLines(child);
+  await request(1, "initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "eof-fixture", version: "1" } });
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+  const catalog = await request(2, "tools/list");
+  assert.ok(catalog.result.tools.length > 0);
+  const probe = `const fs=require('node:fs');const result=[];for(const id of fs.readdirSync('/proc')){if(!/^\\d+$/.test(id))continue;try{const cmd=fs.readFileSync('/proc/'+id+'/cmdline','utf8');const env=fs.readFileSync('/proc/'+id+'/environ','utf8');if(cmd.includes('/mcp/server.mjs')&&env.split('\\0').includes('CODEX_ORCHESTRATION_CONFIG='+process.argv[1]))result.push(Number(id));}catch{}}process.stdout.write(JSON.stringify(result));`;
+  const ownedPids = async () => JSON.parse((await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", wslNode, "-e", probe, configMarker])).stdout);
+  assert.equal((await ownedPids()).length, 1);
+  const close = once(child, "close");
   child.stdin.end();
   const closed = await Promise.race([
-    once(child, "close"),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("Windows launcher did not close its WSL child after stdin EOF")), 10_000))
+    close,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Windows launcher did not close its WSL child after stdin EOF")), 10_000).unref())
   ]);
   assert.equal(Array.isArray(closed), true);
+  assert.deepEqual(await ownedPids(), []);
 });
 
 test("client rejects redirects, handles IPv6 loopback, bounds responses, and redacts error codes", async (t) => {

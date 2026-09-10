@@ -149,6 +149,9 @@ var init_config = __esm({
   }
 });
 
+// src/cli.ts
+import { readFile as readFile4 } from "node:fs/promises";
+
 // src/checkout.ts
 import { execFile as nodeExecFile } from "node:child_process";
 import { lstat, mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
@@ -405,17 +408,9 @@ async function prepareTrustedCheckout(options) {
   };
 }
 
-// src/lifecycle.ts
-import { access, chmod, copyFile, lstat as lstat2, mkdir as mkdir2, readFile as readFile3, rename, rm as rm2, stat as stat2, writeFile } from "node:fs/promises";
-import { constants } from "node:fs";
-import { execFile as nodeExecFile2 } from "node:child_process";
-import { promisify as promisify2 } from "node:util";
-import { homedir as homedir2, platform as platform2 } from "node:os";
-import { dirname as dirname3, join as join2, resolve as resolve4, win32 as win322 } from "node:path";
-import { randomBytes } from "node:crypto";
-
 // src/client.ts
 init_config();
+import { createHmac } from "node:crypto";
 var BridgeError = class extends Error {
   code;
   status;
@@ -429,14 +424,23 @@ var BridgeError = class extends Error {
 var CONTROL_OPERATIONS = /* @__PURE__ */ new Set([
   "bind_project",
   "enroll",
+  "register_pm",
+  "claim",
   "revise",
   "pause",
   "resume",
   "interrupt",
   "cancel",
-  "review"
+  "review",
+  "handoff",
+  "operator_takeover"
 ]);
 var MAX_RESPONSE_BYTES = 1048576;
+var PM_CREDENTIAL_CONTEXT = "codex-orchestration-pm-v1:";
+function derivePmCredential(operatorToken, threadId) {
+  const digest = createHmac("sha256", operatorToken).update(`${PM_CREDENTIAL_CONTEXT}${threadId}`, "utf8").digest("hex");
+  return `pm-v1.${threadId}.${digest}`;
+}
 function endpointHost(host) {
   return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }
@@ -452,15 +456,17 @@ function safeMessage(status, body, token) {
   return `Symphony request failed with HTTP ${status}`;
 }
 var ManagedClient = class _ManagedClient {
-  constructor(config, token) {
+  constructor(config, operatorToken, trustedThreadId) {
     this.config = config;
-    this.token = token;
+    this.trustedThreadId = trustedThreadId;
+    this.authorizationToken = trustedThreadId ? derivePmCredential(operatorToken, trustedThreadId) : operatorToken;
   }
   config;
-  token;
-  static async fromConfig() {
+  trustedThreadId;
+  authorizationToken;
+  static async fromConfig(trustedThreadId) {
     const config = await loadConfig();
-    return new _ManagedClient(config, await readToken(config));
+    return new _ManagedClient(config, await readToken(config), trustedThreadId);
   }
   async state() {
     return this.request("/api/v1/managed/state", { method: "GET" });
@@ -494,7 +500,7 @@ var ManagedClient = class _ManagedClient {
     try {
       response = await fetch(`http://${endpointHost(this.config.host)}:${this.config.port}${path}`, {
         ...init,
-        headers: { ...init.headers ?? {}, authorization: `Bearer ${this.token}` },
+        headers: { ...init.headers ?? {}, authorization: `Bearer ${this.authorizationToken}` },
         redirect: "error",
         signal: AbortSignal.timeout(65e3)
       });
@@ -530,12 +536,19 @@ var ManagedClient = class _ManagedClient {
       if (error instanceof BridgeError) throw error;
       throw new BridgeError("upstream_invalid_response", response.ok ? "Symphony returned invalid JSON" : `Symphony request failed with HTTP ${response.status}`, response.status);
     }
-    if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed, this.token), response.status);
+    if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed, this.authorizationToken), response.status);
     return parsed;
   }
 };
 
 // src/lifecycle.ts
+import { access, chmod, copyFile, lstat as lstat2, mkdir as mkdir2, readFile as readFile3, rename, rm as rm2, stat as stat2, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { execFile as nodeExecFile2 } from "node:child_process";
+import { promisify as promisify2 } from "node:util";
+import { homedir as homedir2, platform as platform2 } from "node:os";
+import { dirname as dirname3, join as join2, resolve as resolve4, win32 as win322 } from "node:path";
+import { randomBytes } from "node:crypto";
 init_config();
 init_paths();
 var execFile2 = promisify2(nodeExecFile2);
@@ -586,6 +599,7 @@ function lifecyclePaths(env = process.env, os = platform2()) {
     lock: join2(stateRoot, "managed.lock"),
     unit: join2(unitRoot, serviceName.endsWith(".service") ? serviceName : `${serviceName}.service`),
     launcher: join2(dataRoot, "bin", "windows-launcher.ps1"),
+    helper: join2(dataRoot, "bin", "checkout-helper.mjs"),
     taskXml: join2(dataRoot, "bin", "windows-task.xml"),
     metadata: join2(dataRoot, "installation.json"),
     enabledMarker: join2(stateRoot, "service-enabled"),
@@ -749,6 +763,60 @@ function validateVersion(version) {
   const value = version?.trim() || `local-${Date.now()}`;
   if (!RELEASE_PATTERN.test(value)) throw new LifecycleError("version_invalid", "version must contain only letters, numbers, dots, underscores, and hyphens");
   return value;
+}
+function bundledHelperSource() {
+  const entrypoint = process.argv[1];
+  if (entrypoint && /(?:^|[\\/])mcp[\\/]cli\.mjs$/i.test(entrypoint)) return hostPath(entrypoint);
+  return resolve4("mcp/cli.mjs");
+}
+async function stageCheckoutHelper(paths) {
+  const source = bundledHelperSource();
+  let details;
+  try {
+    details = await stat2(source);
+    await access(source, constants.R_OK);
+  } catch {
+    throw new LifecycleError("helper_invalid", `bundled checkout helper is not readable: ${source}`);
+  }
+  if (!details.isFile()) throw new LifecycleError("helper_invalid", `bundled checkout helper is not a regular file: ${source}`);
+  const temporary = `${paths.helper}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
+  try {
+    await copyFile(source, temporary);
+    if (platform2() !== "win32") await chmod(temporary, 448);
+    await rename(temporary, paths.helper);
+  } catch {
+    await rm2(temporary, { force: true });
+    throw new LifecycleError("helper_stage_failed", `could not stage the checkout helper at ${paths.helper}`);
+  }
+}
+function rewriteCheckoutHelperPath(content, helperPath) {
+  const linePattern = /^([ \t]*checkout_helper_path:)[ \t]*(?:(?:"(?:\\.|[^"\r\n])*")|(?:'(?:''|[^'\r\n])*')|(?:[^#\r\n]*?))([ \t]*(?:#.*))?(\r?\n|$)/gm;
+  let replaced = false;
+  const result = content.replace(linePattern, (_match, prefix, suffix = "", end) => {
+    replaced = true;
+    return `${prefix} ${JSON.stringify(helperPath)}${suffix}${end}`;
+  });
+  return replaced ? result : content;
+}
+async function readWorkflow(paths, options) {
+  if (options.workflow) {
+    const source = hostPath(options.workflow);
+    try {
+      await access(source, constants.R_OK);
+      return await readFile3(source, "utf8");
+    } catch {
+      throw new LifecycleError("workflow_invalid", `workflow is not readable: ${source}`);
+    }
+  }
+  try {
+    const existing = await readFile3(paths.workflow, "utf8");
+    if (!existing.trim()) throw new LifecycleError("workflow_missing", `provide --workflow or create ${paths.workflow}`);
+    return existing;
+  } catch (error) {
+    if (error instanceof LifecycleError) throw error;
+    if (error.code === "ENOENT") throw new LifecycleError("workflow_missing", `provide --workflow or create ${paths.workflow}`);
+    throw new LifecycleError("workflow_invalid", `workflow is not readable: ${paths.workflow}`);
+  }
 }
 async function validateExecutable(input) {
   const path = hostPath(input);
@@ -985,7 +1053,7 @@ async function managedControl(paths, operation, disable) {
     }
   }
   if (!state || !Number.isInteger(state.revision)) throw new LifecycleError("state_invalid", "managed state did not include a current revision");
-  return client.control({ request_id: requestId(operation), operation, args: { expected_revision: state.revision, disable } });
+  return client.control({ request_id: requestId(operation), operation, args: { scope: "service", expected_revision: state.revision, disable } });
 }
 async function setupWindows(options) {
   const linuxPaths = await runWslCli("setup", options);
@@ -1003,17 +1071,13 @@ async function setup(options = {}) {
   if (platform2() === "win32") return setupWindows(options);
   const paths = lifecyclePaths(process.env, platform2());
   for (const path of [paths.configRoot, paths.dataRoot, paths.stateRoot, paths.releasesRoot, paths.logsRoot, paths.journalRoot, paths.workspacesRoot, dirname3(paths.unit), dirname3(paths.wrapper)]) await ensureDirectory(path);
-  if (options.workflow) {
-    const source = hostPath(options.workflow);
-    await access(source, constants.R_OK);
-    await writeAtomic(paths.workflow, await readFile3(source, "utf8"));
-  } else if (!await readOptional(paths.workflow)) {
-    throw new LifecycleError("workflow_missing", `provide --workflow or create ${paths.workflow}`);
-  }
+  const workflow = await readWorkflow(paths, options);
   await writeToken(paths, options.tokenFile);
   await writeBridgeConfig(paths, options);
   if (options.executable) await stageRelease(paths, options.executable, validateVersion(options.version));
   if (!await readOptional(paths.currentRelease)) throw new LifecycleError("release_missing", "provide --executable to install the first managed release");
+  await stageCheckoutHelper(paths);
+  await writeAtomic(paths.workflow, rewriteCheckoutHelperPath(workflow, paths.helper));
   await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile3(paths.bridgeConfig, "utf8")).port)), 448);
   if (platform2() === "win32") {
     const metadata = await readMetadata(paths);
@@ -1044,7 +1108,7 @@ async function diagnostics(options = {}) {
     valid: config.valid,
     config,
     service: { name: paths.serviceName, active: await serviceStatus(paths, "is-active"), enabled: await serviceStatus(paths, "is-enabled") },
-    paths: { config: paths.bridgeConfig, workflow: paths.workflow, data: paths.dataRoot, state: paths.stateRoot, journal: paths.journalRoot, workspaces: paths.workspacesRoot, lock: paths.lock, unit: paths.unit },
+    paths: { config: paths.bridgeConfig, workflow: paths.workflow, helper: paths.helper, data: paths.dataRoot, state: paths.stateRoot, journal: paths.journalRoot, workspaces: paths.workspacesRoot, lock: paths.lock, unit: paths.unit },
     release: await readOptional(paths.currentRelease),
     previousRelease: await readOptional(paths.previousRelease),
     task: platform2() === "win32" ? paths.taskName : void 0
@@ -1113,6 +1177,8 @@ async function upgrade(options) {
   await applyStoredTaskName(paths);
   const version = validateVersion(options.version);
   await stageRelease(paths, options.executable, version);
+  await stageCheckoutHelper(paths);
+  await writeAtomic(paths.workflow, rewriteCheckoutHelperPath(await readWorkflow(paths, {}), paths.helper));
   await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile3(paths.bridgeConfig, "utf8")).port)), 448);
   await installUnit(paths);
   if (await serviceStatus(paths, "is-active")) await run("systemctl", ["--user", "restart", paths.serviceName]);
@@ -1179,7 +1245,10 @@ var usage = `Usage:
   codex-orchestration start [setup options]
   codex-orchestration pause | resume | stop | rollback | uninstall
   codex-orchestration upgrade --executable PATH [--version VERSION]
+  codex-orchestration control --input PATH
   codex-orchestration checkout --input PATH [--policy PATH]`;
+var OPERATOR_CONTROL_OPERATIONS = /* @__PURE__ */ new Set(["bind_project", "pause", "resume", "operator_takeover"]);
+var CONTROL_INPUT_MAX_BYTES = 1048576;
 function parseOptions(values) {
   const options = {};
   for (let index = 0; index < values.length; index += 1) {
@@ -1218,6 +1287,69 @@ function parseCheckoutOptions(values) {
   if (!inputFile) throw new CheckoutError("usage", "checkout requires --input PATH");
   return { inputFile, policyFile };
 }
+function parseControlOptions(values) {
+  let inputFile;
+  for (let index = 0; index < values.length; index += 1) {
+    const name = values[index];
+    if (name === "--help") throw new LifecycleError("usage", usage);
+    if (name !== "--input") throw new LifecycleError("usage", `unknown option: ${name}`);
+    if (inputFile) throw new LifecycleError("usage", "control accepts exactly one --input PATH");
+    const value = values[++index];
+    if (!value || value.startsWith("--")) throw new LifecycleError("usage", `${name} requires a value`);
+    inputFile = value;
+  }
+  if (!inputFile) throw new LifecycleError("usage", "control requires --input PATH");
+  return inputFile;
+}
+function plainObject2(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+async function readControlEnvelope(inputFile) {
+  let contents;
+  try {
+    const bytes = await readFile4(inputFile);
+    if (bytes.byteLength > CONTROL_INPUT_MAX_BYTES) throw new LifecycleError("control_input_too_large", "control input exceeds the private envelope limit");
+    contents = bytes.toString("utf8");
+  } catch (error) {
+    if (error instanceof LifecycleError) throw error;
+    throw new LifecycleError("control_input_unreadable", "control input could not be read");
+  }
+  let value;
+  try {
+    value = JSON.parse(contents);
+  } catch {
+    throw new LifecycleError("control_input_invalid", "control input is not valid JSON");
+  }
+  if (!plainObject2(value)) throw new LifecycleError("control_input_invalid", "control input must be a JSON object");
+  const envelopeKeys = Object.keys(value);
+  if (envelopeKeys.some((key) => key !== "request_id" && key !== "operation" && key !== "args")) {
+    throw new LifecycleError("control_input_invalid", "control input must contain only request_id, operation, and args");
+  }
+  const requestId2 = value.request_id;
+  const operation = value.operation;
+  const args = value.args;
+  if (typeof requestId2 !== "string" || requestId2.trim() === "" || requestId2.length > 256) {
+    throw new LifecycleError("control_input_invalid", "control input request_id must be a non-empty string of at most 256 characters");
+  }
+  if (typeof operation !== "string" || !OPERATOR_CONTROL_OPERATIONS.has(operation)) {
+    throw new LifecycleError("operator_required", "control accepts bind_project, service pause/resume, and operator_takeover only");
+  }
+  if (!plainObject2(args)) throw new LifecycleError("control_input_invalid", "control input args must be a JSON object");
+  if ((operation === "pause" || operation === "resume") && args.scope !== "service") {
+    throw new LifecycleError("operator_required", `${operation} control input must use scope service`);
+  }
+  return { request_id: requestId2, operation, args };
+}
+async function control(inputFile) {
+  const request = await readControlEnvelope(inputFile);
+  try {
+    const client = await ManagedClient.fromConfig();
+    return await client.control(request);
+  } catch (error) {
+    if (error instanceof BridgeError) throw new LifecycleError(error.code, error.message, error.status);
+    throw error;
+  }
+}
 function print(value) {
   console.log(JSON.stringify(value, null, 2));
 }
@@ -1232,6 +1364,8 @@ try {
     process.exitCode = 0;
   } else if (command === "checkout") {
     print(await prepareTrustedCheckout(parseCheckoutOptions(args)));
+  } else if (command === "control") {
+    print(await control(parseControlOptions(args)));
   } else {
     const options = parseOptions(args);
     if (command === "diagnostics") print(await diagnostics(options));

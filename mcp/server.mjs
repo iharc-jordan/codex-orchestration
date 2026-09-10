@@ -16739,12 +16739,16 @@ var StdioServerTransport = class {
   }
 };
 
+// src/client.ts
+import { createHmac } from "node:crypto";
+
 // src/config.ts
 import { readFile, stat } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, isAbsolute, join, resolve as resolve2 } from "node:path";
 
 // src/paths.ts
+import { statSync } from "node:fs";
 import { resolve, win32 } from "node:path";
 function toWslPath(input) {
   const absolute = win32.resolve(input);
@@ -16758,7 +16762,19 @@ function fromWslPath(input) {
   return win32.resolve(`${match[1].toUpperCase()}:\\${match[2].replaceAll("/", "\\")}`);
 }
 function resolvedScriptPath(input) {
-  return toWslPath(input ?? resolve("mcp/server.mjs"));
+  return toWslPath(assertMcpEntrypoint(input));
+}
+function assertMcpEntrypoint(input) {
+  const candidate = input ?? resolve("mcp/server.mjs");
+  const hostPath = /^\/mnt\/[A-Za-z]\//.test(candidate) ? fromWslPath(candidate) : /^[A-Za-z]:[\\/]/.test(candidate) ? win32.resolve(candidate) : resolve(candidate);
+  let details;
+  try {
+    details = statSync(hostPath);
+  } catch {
+    throw new Error(`MCP server entrypoint is missing from the installed plugin package: ${hostPath}. Reinstall the plugin package or refresh its installation.`);
+  }
+  if (!details.isFile()) throw new Error(`MCP server entrypoint is not a regular file: ${hostPath}. Reinstall the plugin package or refresh its installation.`);
+  return hostPath;
 }
 
 // src/config.ts
@@ -16869,14 +16885,23 @@ var BridgeError = class extends Error {
 var CONTROL_OPERATIONS = /* @__PURE__ */ new Set([
   "bind_project",
   "enroll",
+  "register_pm",
+  "claim",
   "revise",
   "pause",
   "resume",
   "interrupt",
   "cancel",
-  "review"
+  "review",
+  "handoff",
+  "operator_takeover"
 ]);
 var MAX_RESPONSE_BYTES = 1048576;
+var PM_CREDENTIAL_CONTEXT = "codex-orchestration-pm-v1:";
+function derivePmCredential(operatorToken, threadId) {
+  const digest = createHmac("sha256", operatorToken).update(`${PM_CREDENTIAL_CONTEXT}${threadId}`, "utf8").digest("hex");
+  return `pm-v1.${threadId}.${digest}`;
+}
 function endpointHost(host) {
   return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }
@@ -16892,15 +16917,17 @@ function safeMessage(status, body, token) {
   return `Symphony request failed with HTTP ${status}`;
 }
 var ManagedClient = class _ManagedClient {
-  constructor(config2, token) {
+  constructor(config2, operatorToken, trustedThreadId) {
     this.config = config2;
-    this.token = token;
+    this.trustedThreadId = trustedThreadId;
+    this.authorizationToken = trustedThreadId ? derivePmCredential(operatorToken, trustedThreadId) : operatorToken;
   }
   config;
-  token;
-  static async fromConfig() {
+  trustedThreadId;
+  authorizationToken;
+  static async fromConfig(trustedThreadId) {
     const config2 = await loadConfig();
-    return new _ManagedClient(config2, await readToken(config2));
+    return new _ManagedClient(config2, await readToken(config2), trustedThreadId);
   }
   async state() {
     return this.request("/api/v1/managed/state", { method: "GET" });
@@ -16934,7 +16961,7 @@ var ManagedClient = class _ManagedClient {
     try {
       response = await fetch(`http://${endpointHost(this.config.host)}:${this.config.port}${path}`, {
         ...init,
-        headers: { ...init.headers ?? {}, authorization: `Bearer ${this.token}` },
+        headers: { ...init.headers ?? {}, authorization: `Bearer ${this.authorizationToken}` },
         redirect: "error",
         signal: AbortSignal.timeout(65e3)
       });
@@ -16970,7 +16997,7 @@ var ManagedClient = class _ManagedClient {
       if (error2 instanceof BridgeError) throw error2;
       throw new BridgeError("upstream_invalid_response", response.ok ? "Symphony returned invalid JSON" : `Symphony request failed with HTTP ${response.status}`, response.status);
     }
-    if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed, this.token), response.status);
+    if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed, this.authorizationToken), response.status);
     return parsed;
   }
 };
@@ -16981,9 +17008,24 @@ function asBridgeError(error2) {
 }
 
 // src/server.ts
-var controlOperations = ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"];
+var controlOperations = ["register_pm", "claim", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review", "handoff"];
+var operatorOnlyOperations = /* @__PURE__ */ new Set(["bind_project", "operator_takeover"]);
+var pmOperations = /* @__PURE__ */ new Set(["register_pm", "claim", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review", "handoff"]);
 var revisionProperty = { type: "integer", minimum: 0, description: "Current global or assignment revision required for compare-and-set." };
-var assignmentIdProperty = { type: "string", minLength: 1, description: "Project item node ID used as the assignment key; the service verifies underlying issue ownership separately." };
+var assignmentIdProperty = { type: "string", minLength: 1, description: "Stable managed assignment identifier; the service verifies the canonical issue identity separately." };
+var projectIdProperty = { type: "string", minLength: 1, description: "Explicit GitHub Project identity for this operation." };
+var ownershipRevisionProperty = { type: "integer", minimum: 0, description: "Current assignment ownership revision required for compare-and-set." };
+var assignmentFenceSchema = {
+  type: "object",
+  properties: {
+    assignment_id: assignmentIdProperty,
+    expected_revision: revisionProperty,
+    expected_ownership_revision: ownershipRevisionProperty
+  },
+  required: ["assignment_id", "expected_revision", "expected_ownership_revision"],
+  additionalProperties: false
+};
+var assignmentFencesProperty = { type: "array", minItems: 1, items: assignmentFenceSchema };
 var escalationReasonProperty = { type: "string", minLength: 1, description: "Required when selecting a route other than Luna/xhigh." };
 var requirementsFingerprintProperty = { type: "string", minLength: 1, description: "sha256: followed by the lowercase SHA-256 digest of the exact UTF-8 GitHub issue body. Exclude the title; preserve all whitespace and line endings." };
 var requirementsRevisionProperty = { type: "integer", minimum: 0, description: "Explicit PM material revision, distinct from the assignment revision; not parsed from issue text." };
@@ -17017,10 +17059,30 @@ var operationArgSchemas = {
     required: ["expected_revision", "project"],
     additionalProperties: true
   },
+  register_pm: {
+    type: "object",
+    properties: {
+      display_name: { type: "string", minLength: 1, maxLength: 200, description: "Optional display label; PM identity comes from the trusted Codex thread metadata." }
+    },
+    required: [],
+    additionalProperties: false
+  },
+  claim: {
+    type: "object",
+    properties: {
+      project_id: projectIdProperty,
+      assignment_id: assignmentIdProperty,
+      expected_revision: revisionProperty,
+      expected_ownership_revision: ownershipRevisionProperty
+    },
+    required: ["project_id", "assignment_id", "expected_revision", "expected_ownership_revision"],
+    additionalProperties: true
+  },
   enroll: {
     type: "object",
     properties: {
       expected_revision: revisionProperty,
+      project_id: projectIdProperty,
       assignment_id: assignmentIdProperty,
       project_item_id: { type: "string", minLength: 1 },
       native_issue_id: { type: "string", minLength: 1 },
@@ -17029,7 +17091,7 @@ var operationArgSchemas = {
       issue_number: { type: "integer", minimum: 1 },
       base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
       board_state: { type: "string", enum: ["READY"] },
-      owner: { type: "string", minLength: 1 },
+      owner: { type: "string", minLength: 1, description: "Legacy display metadata only; never used as PM authority." },
       resources: { type: "array", items: { type: "string" } },
       dependencies: { type: "array", items: { type: "string" } },
       route: routeProperty,
@@ -17037,13 +17099,15 @@ var operationArgSchemas = {
       requirements_fingerprint: requirementsFingerprintProperty,
       requirements_revision: requirementsRevisionProperty
     },
-    required: ["expected_revision", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
+    required: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
     additionalProperties: true
   },
   revise: {
     type: "object",
     properties: {
       expected_revision: revisionProperty,
+      expected_ownership_revision: ownershipRevisionProperty,
+      project_id: projectIdProperty,
       assignment_id: assignmentIdProperty,
       changes: {
         type: "object",
@@ -17060,44 +17124,78 @@ var operationArgSchemas = {
         additionalProperties: false
       }
     },
-    required: ["expected_revision", "assignment_id", "changes"],
+    required: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "changes"],
     additionalProperties: true
   },
   pause: {
     type: "object",
-    properties: { expected_revision: revisionProperty, disable: { type: "boolean" }, reason: { type: "string" } },
-    required: ["expected_revision"],
-    additionalProperties: true
+    properties: {
+      scope: { type: "string", enum: ["assignments"] },
+      project_id: projectIdProperty,
+      assignments: assignmentFencesProperty,
+      reason: { type: "string" }
+    },
+    required: ["scope", "project_id", "assignments"],
+    additionalProperties: false
   },
   resume: {
     type: "object",
-    properties: { expected_revision: revisionProperty, reason: { type: "string" } },
-    required: ["expected_revision"],
-    additionalProperties: true
+    properties: {
+      scope: { type: "string", enum: ["assignments"] },
+      project_id: projectIdProperty,
+      assignments: assignmentFencesProperty,
+      reason: { type: "string" }
+    },
+    required: ["scope", "project_id", "assignments"],
+    additionalProperties: false
   },
   interrupt: {
     type: "object",
-    properties: { expected_revision: revisionProperty, assignment_id: assignmentIdProperty, reason: { type: "string", minLength: 1 } },
-    required: ["expected_revision", "assignment_id", "reason"],
+    properties: { expected_revision: revisionProperty, expected_ownership_revision: ownershipRevisionProperty, project_id: projectIdProperty, assignment_id: assignmentIdProperty, reason: { type: "string", minLength: 1 } },
+    required: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "reason"],
     additionalProperties: true
   },
   cancel: {
     type: "object",
-    properties: { expected_revision: revisionProperty, assignment_id: assignmentIdProperty, reason: { type: "string" } },
-    required: ["expected_revision", "assignment_id"],
+    properties: { expected_revision: revisionProperty, expected_ownership_revision: ownershipRevisionProperty, project_id: projectIdProperty, assignment_id: assignmentIdProperty, reason: { type: "string" } },
+    required: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id"],
     additionalProperties: true
   },
   review: {
     type: "object",
     properties: {
       expected_revision: revisionProperty,
+      expected_ownership_revision: ownershipRevisionProperty,
+      project_id: projectIdProperty,
       assignment_id: assignmentIdProperty,
       disposition: { type: "string", enum: ["accepted", "rework", "waiting", "blocked"] },
       evidence: { type: "array", items: { type: "string", minLength: 1 } },
       reason: { type: "string" }
     },
-    required: ["expected_revision", "assignment_id", "disposition"],
+    required: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "disposition"],
     additionalProperties: true
+  },
+  handoff: {
+    type: "object",
+    properties: {
+      project_id: projectIdProperty,
+      assignments: assignmentFencesProperty,
+      destination_pm_id: { type: "string", minLength: 1 },
+      reason: { type: "string", minLength: 1 }
+    },
+    required: ["project_id", "assignments", "destination_pm_id", "reason"],
+    additionalProperties: false
+  },
+  operator_takeover: {
+    type: "object",
+    properties: {
+      project_id: projectIdProperty,
+      assignments: assignmentFencesProperty,
+      destination_pm_id: { type: "string", minLength: 1 },
+      reason: { type: "string", minLength: 1 }
+    },
+    required: ["project_id", "assignments", "destination_pm_id", "reason"],
+    additionalProperties: false
   }
 };
 var tools = [
@@ -17108,12 +17206,12 @@ var tools = [
   },
   {
     name: "orchestration_state",
-    description: "Read the compact managed Symphony state and latest durable event cursor.",
+    description: "Read managed Symphony state. Without Codex _meta.threadId this uses operator authentication and cannot identify a PM.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false }
   },
   {
     name: "orchestration_events",
-    description: "Read managed events after a cursor. wait_ms is bounded to 60000 and limit to 100.",
+    description: "Read managed events after a cursor. Without Codex _meta.threadId this uses operator authentication and cannot identify a PM. wait_ms is bounded to 60000 and limit to 100.",
     inputSchema: {
       type: "object",
       properties: {
@@ -17127,7 +17225,7 @@ var tools = [
   },
   ...controlOperations.map((operation) => ({
     name: `orchestration_${operation}`,
-    description: `Submit the ${operation} operation to Symphony. Supply a caller-owned request_id and the operation-specific args; the bridge preserves both and never retries writes.`,
+    description: `Submit the ${operation} operation to Symphony using the trusted Codex thread identity in request metadata. Supply a caller-owned request_id and the operation-specific args; the bridge preserves both and never retries writes.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -17139,6 +17237,45 @@ var tools = [
     }
   }))
 ];
+var THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isJsonObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function parseTurnMetadata(value) {
+  if (isJsonObject(value)) return value;
+  if (typeof value !== "string") return void 0;
+  try {
+    const parsed = JSON.parse(value);
+    return isJsonObject(parsed) ? parsed : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function nativeCaller(request) {
+  const meta2 = request.params?._meta;
+  if (meta2 === void 0) return void 0;
+  if (!isJsonObject(meta2)) throw new BridgeError("caller_identity_invalid", "MCP request metadata must be an object");
+  const rawThreadId = meta2.threadId;
+  if (rawThreadId === void 0) return void 0;
+  if (typeof rawThreadId !== "string" || !THREAD_ID_PATTERN.test(rawThreadId)) {
+    throw new BridgeError("caller_identity_invalid", "MCP metadata threadId must be a UUID");
+  }
+  const turnMetadata = parseTurnMetadata(meta2["x-codex-turn-metadata"]);
+  const turnThreadId = turnMetadata?.thread_id;
+  if (typeof turnThreadId === "string" && THREAD_ID_PATTERN.test(turnThreadId) && turnThreadId !== rawThreadId) {
+    throw new BridgeError("caller_identity_mismatch", "MCP metadata threadId does not match x-codex-turn-metadata.thread_id");
+  }
+  return { threadId: rawThreadId };
+}
+function requireNativePm(operation, caller, args) {
+  if ((operation === "pause" || operation === "resume") && isJsonObject(args) && args.scope === "service") {
+    throw new BridgeError("operator_required", "service pause and resume require the operator CLI");
+  }
+  if (!caller) {
+    throw new BridgeError("caller_identity_required", `${operation} requires Codex _meta.threadId; operator authentication is not a PM fallback`);
+  }
+  return caller;
+}
 function jsonResult(value) {
   return { content: [{ type: "text", text: JSON.stringify(value) }] };
 }
@@ -17155,19 +17292,28 @@ async function runBridge() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
       const name = request.params.name;
+      const caller = nativeCaller(request);
       if (name === "orchestration_diagnostics") return jsonResult(await validateConfig());
-      const client = await ManagedClient.fromConfig();
-      if (name === "orchestration_state") return jsonResult(await client.state());
+      if (name === "orchestration_state") {
+        const client = await ManagedClient.fromConfig(caller?.threadId);
+        return jsonResult(await client.state());
+      }
       if (name === "orchestration_events") {
+        const client = await ManagedClient.fromConfig(caller?.threadId);
         const args = request.params.arguments ?? {};
         return jsonResult(await client.events(args.after, args.wait_ms, args.limit));
       }
       const operation = name.replace(/^orchestration_/, "");
-      if (controlOperations.includes(operation)) {
+      if (operatorOnlyOperations.has(operation)) {
+        throw new BridgeError("operator_required", `${operation} requires the operator CLI`);
+      }
+      if (pmOperations.has(operation)) {
         const args = request.params.arguments ?? {};
-        if (!args || typeof args !== "object" || Array.isArray(args) || !("args" in args)) {
+        const pmCaller = requireNativePm(operation, caller, isJsonObject(args) ? args.args : void 0);
+        if (!isJsonObject(args) || !("args" in args)) {
           throw new BridgeError("args_invalid", "args is required and must be supplied by the caller");
         }
+        const client = await ManagedClient.fromConfig(pmCaller.threadId);
         return jsonResult(await client.control({
           request_id: args.request_id,
           operation,
@@ -17179,10 +17325,12 @@ async function runBridge() {
       return errorResult(error2);
     }
   });
+  server.onclose = () => process.exit(0);
   await server.connect(new StdioServerTransport());
 }
 function runWindowsLauncher() {
-  const script = resolvedScriptPath(process.argv[1]);
+  const hostScript = assertMcpEntrypoint(process.argv[1]);
+  const script = resolvedScriptPath(hostScript);
   const configuredNode = process.env.CODEX_ORCHESTRATION_WSL_NODE?.trim();
   const wslNode = configuredNode || resolveWslNode();
   const environment = { ...process.env };
@@ -17192,20 +17340,46 @@ function runWindowsLauncher() {
   }
   const forwardedEnvironment = ["CODEX_ORCHESTRATION_CONFIG", "XDG_CONFIG_HOME"].flatMap((name) => environment[name] ? [`${name}=${environment[name]}`] : []);
   const child = spawn("wsl.exe", ["-d", "Ubuntu", "--", "env", ...forwardedEnvironment, wslNode, script, ...process.argv.slice(2)], {
-    stdio: "inherit",
+    stdio: ["pipe", "inherit", "inherit"],
     windowsHide: true,
     env: environment
   });
-  const forwardSignal = (signal) => {
-    if (!child.killed) child.kill(signal);
+  let shuttingDown = false;
+  let forceKillTimer;
+  const forceKill = () => {
+    if (child.exitCode !== null || !child.pid) return;
+    const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true
+    });
+    killer.once("error", () => void 0);
+    killer.unref();
   };
-  process.once("SIGINT", () => forwardSignal("SIGINT"));
-  process.once("SIGTERM", () => forwardSignal("SIGTERM"));
-  process.once("exit", () => {
-    if (!child.killed) child.kill("SIGTERM");
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (child.exitCode !== null) return;
+    process.stdin.unpipe(child.stdin);
+    child.stdin.end();
+    forceKillTimer = setTimeout(forceKill, 2e3);
+    forceKillTimer.unref();
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  process.stdin.once("end", () => shutdown());
+  process.stdin.once("close", () => shutdown());
+  child.stdin.on("error", () => shutdown());
+  process.stdin.pipe(child.stdin);
+  child.once("error", (error2) => {
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+    process.stderr.write(`codex-orchestration: could not start the Ubuntu MCP bridge: ${error2.message}
+`);
+    process.exitCode = 1;
   });
   child.once("close", (code) => {
+    if (forceKillTimer) clearTimeout(forceKillTimer);
     process.exitCode = code ?? 1;
+    process.stdin.pause();
   });
 }
 function resolveWslNode() {
@@ -17222,5 +17396,13 @@ function resolveWslNode() {
   if (!candidate) throw new Error("Ubuntu WSL did not return a Linux Node runtime; set CODEX_ORCHESTRATION_WSL_NODE");
   return candidate;
 }
-if (process.platform === "win32") runWindowsLauncher();
-else await runBridge();
+if (process.platform === "win32") {
+  try {
+    runWindowsLauncher();
+  } catch (error2) {
+    const message = error2 instanceof Error ? error2.message : "could not start the Windows MCP bridge";
+    process.stderr.write(`codex-orchestration: ${message}
+`);
+    process.exitCode = 1;
+  }
+} else await runBridge();
