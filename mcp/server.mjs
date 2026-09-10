@@ -17049,6 +17049,7 @@ var operationArgSchemas = {
           project_id: { type: "string", minLength: 1 },
           project_number: { type: "integer", minimum: 1 },
           status_field_id: { type: "string", minLength: 1 },
+          projection_field_id: { type: "string", minLength: 1 },
           status_options: { type: "object", minProperties: 1, additionalProperties: { type: "string", minLength: 1 } },
           repositories: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } }
         },
@@ -17285,7 +17286,7 @@ function errorResult(error2) {
 }
 async function runBridge() {
   const server = new Server(
-    { name: "codex-orchestration", version: "0.1.0" },
+    { name: "codex-orchestration", version: "0.2.0" },
     { capabilities: { tools: {} } }
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
