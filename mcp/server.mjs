@@ -17133,7 +17133,7 @@ var operationArgSchemas = {
           resources: resourcesProperty,
           dependencies: { type: "array", items: { type: "string" } },
           requirements: { type: "object" },
-          requirements_fingerprint: requirementsFingerprintProperty,
+          requirements_fingerprint: { type: "string", minLength: 1, description: "Required when the issue body changes: sha256: plus the SHA-256 digest of its exact UTF-8 body. Omission preserves the enrolled fingerprint; only enrollment resolves it automatically." },
           requirements_revision: requirementsRevisionProperty
         },
         additionalProperties: false

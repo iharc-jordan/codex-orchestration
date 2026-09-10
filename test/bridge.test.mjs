@@ -215,6 +215,7 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   assert.deepEqual(enrollSchema.resources.items.properties.kind.enum, ["repository", "path", "database", "deployment", "other"]);
   assert.deepEqual(enrollSchema.resources.items.properties.access.enum, ["read", "write"]);
   assert.match(enrollSchema.requirements_fingerprint.description, /resolves this from GitHub when omitted/);
+  assert.match(listedTools.get("orchestration_revise").inputSchema.properties.args.properties.changes.properties.requirements_fingerprint.description, /Omission preserves the enrolled fingerprint/);
   assert.deepEqual(listedTools.get("orchestration_revise").inputSchema.properties.args.properties.changes.properties.resources, enrollSchema.resources);
   assert.equal(listedTools.get("orchestration_revise").inputSchema.properties.args.properties.changes.properties.escalation_reason.type, "string");
 

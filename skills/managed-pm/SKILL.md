@@ -31,6 +31,9 @@ request across uncertain retries. Assignment controls compare expected_revision
 and expected_ownership_revision from current state; the bridge does not invent
 request IDs or retry writes. Revise material requirements before further dispatch
 when scope changes. Never use an old owner's authority after handoff.
+When changing an existing issue body, revise must carry its new exact UTF-8
+body fingerprint; omission retains the previous fingerprint. Automatic source
+fingerprint resolution currently applies only to enrollment.
 
 Pause/resume name an exact assignments list, each with assignment_id and both
 revision fences. Pause stops new dispatch while healthy active work finishes.
