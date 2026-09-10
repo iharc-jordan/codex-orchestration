@@ -1,5 +1,11 @@
 # Local service lifecycle
 
+The published v1 pairing is plugin `v0.1.0` with Symphony runtime `v0.1.6`.
+The lifecycle commands below are the supported release procedure. The current
+checkout also contains an unreleased `v0.2.0` candidate; it has no public
+runtime artifact or production pilot, so use it only from a local checkout with
+a matching local Symphony build and disposable validation.
+
 The shipped `mcp/cli.mjs` entrypoint manages the local Symphony executable and
 its host service. It does not install another Node, Codex, GitHub CLI, or
 scheduler.
@@ -27,6 +33,8 @@ installs the owned service assets but does not enable or resume execution.
 Run these commands from the installed plugin directory (reported by
 `codex plugin add --json`) or a checkout of its pinned source. Setup stages an
 immutable release label; use a new label when upgrading to a changed executable.
+The `local-2` label in the example below is a private staging label, not a
+published version.
 
 On Windows, setup delegates these Linux-owned roots and service operations to
 Ubuntu WSL. The installed bridge also runs its Linux Node process in Ubuntu, so
@@ -101,6 +109,56 @@ worker credentials.
 The Windows launcher resolves Linux Node from the Ubuntu login environment. Set
 `CODEX_ORCHESTRATION_WSL_NODE` to an absolute WSL Node path when an explicit
 runtime is required.
+
+## Managed v2 candidate controls
+
+The local candidate uses the same loopback endpoint and journal as v1 while
+adding authenticated PM ownership controls. Native PM tools are
+`orchestration_register_pm`, `orchestration_claim`, `orchestration_enroll`,
+`orchestration_revise`, `orchestration_pause`, `orchestration_resume`,
+`orchestration_interrupt`, `orchestration_cancel`, `orchestration_review`, and
+`orchestration_handoff`. Each call carries a caller-owned `request_id`; the
+bridge preserves the exact request and does not retry an uncertain write.
+
+Use the Project item ID as `assignment_id` and include the explicit
+`project_id`. Enrollment resources are typed references, for example:
+
+```json
+{
+  "request_id": "enroll-item-1",
+  "operation": "enroll",
+  "args": {
+    "expected_revision": 12,
+    "project_id": "PVT_example",
+    "assignment_id": "PVTI_item",
+    "repository": "OWNER/REPOSITORY",
+    "issue_number": 42,
+    "base_commit": "0123456789abcdef0123456789abcdef01234567",
+    "board_state": "READY",
+    "resources": [
+      {"kind":"repository","authority":"github.com","identity":"OWNER/REPOSITORY","access":"write"}
+    ],
+    "dependencies": [],
+    "route": {"model":"gpt-5.6-luna","effort":"xhigh"}
+  }
+}
+```
+
+The runtime checks the live Project item and resolves native issue/repository
+identity and the exact issue-body fingerprint from GitHub. The PM does not
+manually hash issue text; any identity or fingerprint supplied by the caller is
+validated against the provider. Use the current assignment revision and
+ownership revision from managed state for subsequent controls.
+
+Pause/resume use a fenced `assignments` list. Handoff uses the same fences and
+names a registered `destination_pm_id`; it transfers PM responsibility while
+preserving a healthy worker's attempt identity. The recipient continues from
+the current assignment state. Legacy state marked `needs_claim` requires the
+operator's explicit `operator_takeover` control.
+
+These controls are candidate behavior and are not covered by the published v1
+release receipt. Do not substitute a `v0.2.0` URL or claim production support
+until the real PM pilot and release checks have passed.
 
 ## Trusted assignment checkout
 

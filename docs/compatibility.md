@@ -2,6 +2,11 @@
 
 The initial supported targets are Windows with Ubuntu WSL2 and native Ubuntu Linux. Workers and the Symphony service execute in Linux. Windows hosts the Codex PM and the stdio bridge launcher.
 
+The verified release pairing documented here is plugin `v0.1.0` with Symphony
+runtime `v0.1.6`. The current checkout reports plugin `v0.2.0`, but that is an
+unreleased managed-control candidate. Its local contract and focused tests do
+not establish a public release, production deployment, or PM pilot.
+
 ## Verified development baseline
 
 | Component | Observed version | Evidence boundary |
@@ -13,6 +18,7 @@ The initial supported targets are Windows with Ubuntu WSL2 and native Ubuntu Lin
 | Node.js | 24.15.0 Windows; 24.13.1 Linux | Bridge development and focused tests |
 | Symphony source | `011c7233aa64307f63ac808c4e2802c8bebda819` / runtime `0.1.6` | Release source; qualified full gate passed 425 tests with zero failures, six skips, 100% configured coverage, format, specs, Credo, and Dialyzer |
 | Installed Symphony binary | `0.1.6` from `011c7233aa64307f63ac808c4e2802c8bebda819` | Upgrade/start verification passed with HTTP 200 and preserved MCP state; bounded PM pilot accepted |
+| Current local plugin candidate | `0.2.0` | Managed v2 contract and focused tests only; no public artifact, production verification, or real PM pilot |
 | Elixir / OTP | Repository-pinned mise toolchain | Build and full upstream checks |
 
 Package metadata declares Node.js 20 or later. That declaration is not a claim that every intervening Node version has been tested. Release receipts must identify the exact plugin, Symphony integration and executable versions tested together.
@@ -48,6 +54,14 @@ The hidden Windows launcher keeps an enabled WSL service session available. It m
 
 Native Windows workers, distributed scheduling, automatic migration of desktop workers, Project State synchronization and ordinary sidebar visibility for managed workers are outside the initial release.
 
+The local v2 candidate adds typed resource references, explicit Project and
+assignment ownership fences, PM registration and claim, and fenced handoff.
+The runtime resolves provider identity and issue-body fingerprints; these
+candidate controls do not require the PM to calculate a manual hash. A healthy
+worker may continue through handoff while PM responsibility changes. These
+behaviors are covered by local contract and runtime tests, not by the
+published v1 release evidence above.
+
 ## Release acceptance
 
 The qualified 0.1.6 source gate passed 425 tests with zero failures, six skips,
@@ -59,3 +73,7 @@ public Git installation and publication evidence. Usage telemetry can arrive
 after a result: the pilot managed snapshot was 55,740 tokens below the final
 worker session count. Allow for in-flight and late-reported usage; raw token
 counts that include cached input do not establish billed cost.
+
+No `v0.2.0` release or pilot receipt exists yet. Keep candidate validation
+separate from these v1 acceptance claims until the real PM pilot and release
+checks are complete.

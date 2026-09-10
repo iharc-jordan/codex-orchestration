@@ -14,6 +14,7 @@ export interface ProjectBinding {
   project_id: string;
   project_number: number;
   status_field_id: string;
+  projection_field_id?: string;
   status_options: Record<string, string>;
   repositories: string[];
 }

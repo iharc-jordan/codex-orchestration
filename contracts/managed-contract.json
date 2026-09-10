@@ -7,9 +7,9 @@
   "properties": {
     "operations": {
       "type": "array",
-      "items": { "enum": ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"] },
-      "minItems": 8,
-      "maxItems": 8,
+      "items": { "enum": ["bind_project", "register_pm", "claim", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review", "handoff"] },
+      "minItems": 11,
+      "maxItems": 11,
       "uniqueItems": true
     },
     "control_request": {
@@ -17,7 +17,7 @@
       "required": ["request_id", "operation", "args"],
       "properties": {
         "request_id": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "operation": { "enum": ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"] },
+        "operation": { "enum": ["bind_project", "register_pm", "claim", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review", "handoff"] },
         "args": { "type": "object", "additionalProperties": true }
       },
       "additionalProperties": false
