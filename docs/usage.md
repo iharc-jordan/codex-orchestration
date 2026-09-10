@@ -55,6 +55,45 @@ unit is run through `/usr/bin/flock --nonblock` using a lock in the state root.
 On Windows, the hidden standard-user task keeps the Ubuntu WSL session alive
 while the service is enabled; logon does not enable a service that was disabled.
 
+## Operator controls and PM identity
+
+Native MCP mutations require the Codex task's trusted `_meta.threadId`. The
+bridge derives a private per-task capability from that UUID and the configured
+operator token before sending the request to Symphony. A model-supplied
+`owner`, `pm_id`, display name, working directory, or environment value never
+selects PM authority. `orchestration_state` and `orchestration_events` remain
+available without task metadata for diagnosis, but that mode cannot identify a
+PM.
+
+Project binding, service pause/resume, and an emergency operator takeover are
+operator-only actions. Submit one exact JSON control envelope through the
+private CLI input file:
+
+```text
+node ./mcp/cli.mjs control --input /path/to/operator-control.json
+```
+
+The envelope uses the same wire shape as the managed control endpoint. For
+example, a service pause is:
+
+```json
+{
+  "request_id": "operator-pause-2026-09-09",
+  "operation": "pause",
+  "args": {
+    "scope": "service",
+    "reason": "planned maintenance"
+  }
+}
+```
+
+The CLI accepts only `bind_project`, service-scoped `pause` or `resume`, and
+`operator_takeover`. It reads the file once, loads the operator credential from
+the configured owner-only token file, sends one request, and does not retry a
+write. Keep the input file under the private control root and remove it after
+the response has been recorded. The file must not contain bearer tokens or
+worker credentials.
+
 The Windows launcher resolves Linux Node from the Ubuntu login environment. Set
 `CODEX_ORCHESTRATION_WSL_NODE` to an absolute WSL Node path when an explicit
 runtime is required.

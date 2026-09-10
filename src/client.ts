@@ -1,6 +1,7 @@
+import { createHmac } from "node:crypto";
 import { BridgeConfig, ConfigError, loadConfig, readToken } from "./config.js";
 
-export type ControlOperation = "bind_project" | "enroll" | "revise" | "pause" | "resume" | "interrupt" | "cancel" | "review";
+export type ControlOperation = "bind_project" | "enroll" | "register_pm" | "claim" | "revise" | "pause" | "resume" | "interrupt" | "cancel" | "review" | "handoff" | "operator_takeover";
 export type ManagedPhase = "ready" | "active" | "review" | "accepted" | "waiting" | "cancelled";
 export type ReviewDisposition = "accepted" | "rework" | "waiting" | "blocked";
 
@@ -64,6 +65,7 @@ export interface BindProjectArgs extends RevisionArgs {
 }
 
 export interface EnrollArgs extends RevisionArgs {
+  project_id: string;
   assignment_id: string;
   project_item_id?: string;
   native_issue_id?: string;
@@ -72,7 +74,7 @@ export interface EnrollArgs extends RevisionArgs {
   issue_number: number;
   base_commit: string;
   board_state: "READY" | string;
-  owner: string;
+  owner?: string;
   resources: string[];
   dependencies: string[];
   route: WorkerRoute;
@@ -82,41 +84,83 @@ export interface EnrollArgs extends RevisionArgs {
 }
 
 export interface ReviseArgs extends RevisionArgs {
+  project_id: string;
   assignment_id: string;
+  expected_ownership_revision: number;
   requirements_fingerprint?: string;
   requirements_revision?: number;
   [key: string]: unknown;
 }
 
 export interface PauseArgs extends RevisionArgs {
+  scope?: "assignments" | "service";
+  project_id?: string;
+  assignments?: AssignmentFence[];
   disable?: boolean;
   reason?: string;
 }
 
 export interface ResumeArgs extends RevisionArgs {
+  scope?: "assignments" | "service";
+  project_id?: string;
+  assignments?: AssignmentFence[];
   reason?: string;
+}
+
+export interface AssignmentFence {
+  assignment_id: string;
+  expected_revision: number;
+  expected_ownership_revision: number;
 }
 
 export interface AssignmentControlArgs extends RevisionArgs {
   assignment_id: string;
+  project_id: string;
+  expected_ownership_revision: number;
   reason?: string;
 }
 
 export interface ReviewArgs extends RevisionArgs {
+  project_id: string;
   assignment_id: string;
+  expected_ownership_revision: number;
   disposition: ReviewDisposition;
   evidence: string[];
 }
 
+export interface RegisterPmArgs {
+  display_name?: string;
+}
+
+export interface ClaimArgs {
+  project_id: string;
+  assignment_id: string;
+  expected_revision: number;
+  expected_ownership_revision: number;
+}
+
+export interface HandoffArgs {
+  project_id: string;
+  assignments: AssignmentFence[];
+  destination_pm_id: string;
+  reason: string;
+}
+
+export interface OperatorTakeoverArgs extends HandoffArgs {}
+
 export type ControlArgsByOperation = {
   bind_project: BindProjectArgs;
   enroll: EnrollArgs;
+  register_pm: RegisterPmArgs;
+  claim: ClaimArgs;
   revise: ReviseArgs;
   pause: PauseArgs;
   resume: ResumeArgs;
   interrupt: AssignmentControlArgs;
   cancel: AssignmentControlArgs;
   review: ReviewArgs;
+  handoff: HandoffArgs;
+  operator_takeover: OperatorTakeoverArgs;
 };
 
 export type ControlArgs<O extends ControlOperation = ControlOperation> = O extends ControlOperation
@@ -147,10 +191,19 @@ export class BridgeError extends Error {
 }
 
 const CONTROL_OPERATIONS = new Set<ControlOperation>([
-  "bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"
+  "bind_project", "enroll", "register_pm", "claim", "revise", "pause", "resume", "interrupt", "cancel", "review", "handoff", "operator_takeover"
 ]);
 
 const MAX_RESPONSE_BYTES = 1_048_576;
+const PM_CREDENTIAL_CONTEXT = "codex-orchestration-pm-v1:";
+
+/** Derive the private capability sent to Symphony for one trusted Codex thread. */
+export function derivePmCredential(operatorToken: string, threadId: string): string {
+  const digest = createHmac("sha256", operatorToken)
+    .update(`${PM_CREDENTIAL_CONTEXT}${threadId}`, "utf8")
+    .digest("hex");
+  return `pm-v1.${threadId}.${digest}`;
+}
 
 function endpointHost(host: string): string {
   return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
@@ -169,11 +222,21 @@ function safeMessage(status: number, body: unknown, token: string): string {
 }
 
 export class ManagedClient {
-  constructor(private readonly config: BridgeConfig, private readonly token: string) {}
+  private readonly authorizationToken: string;
 
-  static async fromConfig(): Promise<ManagedClient> {
+  constructor(
+    private readonly config: BridgeConfig,
+    operatorToken: string,
+    readonly trustedThreadId?: string
+  ) {
+    this.authorizationToken = trustedThreadId
+      ? derivePmCredential(operatorToken, trustedThreadId)
+      : operatorToken;
+  }
+
+  static async fromConfig(trustedThreadId?: string): Promise<ManagedClient> {
     const config = await loadConfig();
-    return new ManagedClient(config, await readToken(config));
+    return new ManagedClient(config, await readToken(config), trustedThreadId);
   }
 
   async state(): Promise<ManagedState> {
@@ -211,7 +274,7 @@ export class ManagedClient {
     try {
       response = await fetch(`http://${endpointHost(this.config.host)}:${this.config.port}${path}`, {
         ...init,
-        headers: { ...(init.headers ?? {}), authorization: `Bearer ${this.token}` },
+        headers: { ...(init.headers ?? {}), authorization: `Bearer ${this.authorizationToken}` },
         redirect: "error",
         signal: AbortSignal.timeout(65_000)
       });
@@ -247,7 +310,7 @@ export class ManagedClient {
       if (error instanceof BridgeError) throw error;
       throw new BridgeError("upstream_invalid_response", response.ok ? "Symphony returned invalid JSON" : `Symphony request failed with HTTP ${response.status}`, response.status);
     }
-    if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed, this.token), response.status);
+    if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed, this.authorizationToken), response.status);
     return parsed;
   }
 }

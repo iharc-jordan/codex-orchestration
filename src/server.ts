@@ -6,10 +6,25 @@ import { asBridgeError, BridgeError, ControlArgs, ControlOperation, ManagedClien
 import { validateConfig } from "./config.js";
 import { resolvedScriptPath, toWslPath } from "./paths.js";
 
-const controlOperations: ControlOperation[] = ["bind_project", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review"];
+const controlOperations: ControlOperation[] = ["register_pm", "claim", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review", "handoff"];
+const operatorOnlyOperations = new Set<ControlOperation>(["bind_project", "operator_takeover"]);
+const pmOperations = new Set<ControlOperation>(["register_pm", "claim", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review", "handoff"]);
 
 const revisionProperty = { type: "integer", minimum: 0, description: "Current global or assignment revision required for compare-and-set." };
-const assignmentIdProperty = { type: "string", minLength: 1, description: "Project item node ID used as the assignment key; the service verifies underlying issue ownership separately." };
+const assignmentIdProperty = { type: "string", minLength: 1, description: "Stable managed assignment identifier; the service verifies the canonical issue identity separately." };
+const projectIdProperty = { type: "string", minLength: 1, description: "Explicit GitHub Project identity for this operation." };
+const ownershipRevisionProperty = { type: "integer", minimum: 0, description: "Current assignment ownership revision required for compare-and-set." };
+const assignmentFenceSchema = {
+  type: "object",
+  properties: {
+    assignment_id: assignmentIdProperty,
+    expected_revision: revisionProperty,
+    expected_ownership_revision: ownershipRevisionProperty
+  },
+  required: ["assignment_id", "expected_revision", "expected_ownership_revision"],
+  additionalProperties: false
+};
+const assignmentFencesProperty = { type: "array", minItems: 1, items: assignmentFenceSchema };
 const escalationReasonProperty = { type: "string", minLength: 1, description: "Required when selecting a route other than Luna/xhigh." };
 const requirementsFingerprintProperty = { type: "string", minLength: 1, description: "sha256: followed by the lowercase SHA-256 digest of the exact UTF-8 GitHub issue body. Exclude the title; preserve all whitespace and line endings." };
 const requirementsRevisionProperty = { type: "integer", minimum: 0, description: "Explicit PM material revision, distinct from the assignment revision; not parsed from issue text." };
@@ -44,10 +59,30 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
     required: ["expected_revision", "project"],
     additionalProperties: true
   },
+  register_pm: {
+    type: "object",
+    properties: {
+      display_name: { type: "string", minLength: 1, maxLength: 200, description: "Optional display label; PM identity comes from the trusted Codex thread metadata." }
+    },
+    required: [],
+    additionalProperties: false
+  },
+  claim: {
+    type: "object",
+    properties: {
+      project_id: projectIdProperty,
+      assignment_id: assignmentIdProperty,
+      expected_revision: revisionProperty,
+      expected_ownership_revision: ownershipRevisionProperty
+    },
+    required: ["project_id", "assignment_id", "expected_revision", "expected_ownership_revision"],
+    additionalProperties: true
+  },
   enroll: {
     type: "object",
     properties: {
       expected_revision: revisionProperty,
+      project_id: projectIdProperty,
       assignment_id: assignmentIdProperty,
       project_item_id: { type: "string", minLength: 1 },
       native_issue_id: { type: "string", minLength: 1 },
@@ -56,7 +91,7 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
       issue_number: { type: "integer", minimum: 1 },
       base_commit: { type: "string", pattern: "^[0-9a-fA-F]{40,64}$" },
       board_state: { type: "string", enum: ["READY"] },
-      owner: { type: "string", minLength: 1 },
+      owner: { type: "string", minLength: 1, description: "Legacy display metadata only; never used as PM authority." },
       resources: { type: "array", items: { type: "string" } },
       dependencies: { type: "array", items: { type: "string" } },
       route: routeProperty,
@@ -64,13 +99,15 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
       requirements_fingerprint: requirementsFingerprintProperty,
       requirements_revision: requirementsRevisionProperty
     },
-    required: ["expected_revision", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
+    required: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
     additionalProperties: true
   },
   revise: {
     type: "object",
     properties: {
       expected_revision: revisionProperty,
+      expected_ownership_revision: ownershipRevisionProperty,
+      project_id: projectIdProperty,
       assignment_id: assignmentIdProperty,
       changes: {
         type: "object",
@@ -87,44 +124,78 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
         additionalProperties: false
       }
     },
-    required: ["expected_revision", "assignment_id", "changes"],
+    required: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "changes"],
     additionalProperties: true
   },
   pause: {
     type: "object",
-    properties: { expected_revision: revisionProperty, disable: { type: "boolean" }, reason: { type: "string" } },
-    required: ["expected_revision"],
-    additionalProperties: true
+    properties: {
+      scope: { type: "string", enum: ["assignments"] },
+      project_id: projectIdProperty,
+      assignments: assignmentFencesProperty,
+      reason: { type: "string" }
+    },
+    required: ["scope", "project_id", "assignments"],
+    additionalProperties: false
   },
   resume: {
     type: "object",
-    properties: { expected_revision: revisionProperty, reason: { type: "string" } },
-    required: ["expected_revision"],
-    additionalProperties: true
+    properties: {
+      scope: { type: "string", enum: ["assignments"] },
+      project_id: projectIdProperty,
+      assignments: assignmentFencesProperty,
+      reason: { type: "string" }
+    },
+    required: ["scope", "project_id", "assignments"],
+    additionalProperties: false
   },
   interrupt: {
     type: "object",
-    properties: { expected_revision: revisionProperty, assignment_id: assignmentIdProperty, reason: { type: "string", minLength: 1 } },
-    required: ["expected_revision", "assignment_id", "reason"],
+    properties: { expected_revision: revisionProperty, expected_ownership_revision: ownershipRevisionProperty, project_id: projectIdProperty, assignment_id: assignmentIdProperty, reason: { type: "string", minLength: 1 } },
+    required: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "reason"],
     additionalProperties: true
   },
   cancel: {
     type: "object",
-    properties: { expected_revision: revisionProperty, assignment_id: assignmentIdProperty, reason: { type: "string" } },
-    required: ["expected_revision", "assignment_id"],
+    properties: { expected_revision: revisionProperty, expected_ownership_revision: ownershipRevisionProperty, project_id: projectIdProperty, assignment_id: assignmentIdProperty, reason: { type: "string" } },
+    required: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id"],
     additionalProperties: true
   },
   review: {
     type: "object",
     properties: {
       expected_revision: revisionProperty,
+      expected_ownership_revision: ownershipRevisionProperty,
+      project_id: projectIdProperty,
       assignment_id: assignmentIdProperty,
       disposition: { type: "string", enum: ["accepted", "rework", "waiting", "blocked"] },
       evidence: { type: "array", items: { type: "string", minLength: 1 } },
       reason: { type: "string" }
     },
-    required: ["expected_revision", "assignment_id", "disposition"],
+    required: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "disposition"],
     additionalProperties: true
+  },
+  handoff: {
+    type: "object",
+    properties: {
+      project_id: projectIdProperty,
+      assignments: assignmentFencesProperty,
+      destination_pm_id: { type: "string", minLength: 1 },
+      reason: { type: "string", minLength: 1 }
+    },
+    required: ["project_id", "assignments", "destination_pm_id", "reason"],
+    additionalProperties: false
+  },
+  operator_takeover: {
+    type: "object",
+    properties: {
+      project_id: projectIdProperty,
+      assignments: assignmentFencesProperty,
+      destination_pm_id: { type: "string", minLength: 1 },
+      reason: { type: "string", minLength: 1 }
+    },
+    required: ["project_id", "assignments", "destination_pm_id", "reason"],
+    additionalProperties: false
   }
 };
 
@@ -136,12 +207,12 @@ const tools = [
   },
   {
     name: "orchestration_state",
-    description: "Read the compact managed Symphony state and latest durable event cursor.",
+    description: "Read managed Symphony state. Without Codex _meta.threadId this uses operator authentication and cannot identify a PM.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false }
   },
   {
     name: "orchestration_events",
-    description: "Read managed events after a cursor. wait_ms is bounded to 60000 and limit to 100.",
+    description: "Read managed events after a cursor. Without Codex _meta.threadId this uses operator authentication and cannot identify a PM. wait_ms is bounded to 60000 and limit to 100.",
     inputSchema: {
       type: "object",
       properties: {
@@ -155,7 +226,7 @@ const tools = [
   },
   ...controlOperations.map((operation) => ({
     name: `orchestration_${operation}`,
-    description: `Submit the ${operation} operation to Symphony. Supply a caller-owned request_id and the operation-specific args; the bridge preserves both and never retries writes.`,
+    description: `Submit the ${operation} operation to Symphony using the trusted Codex thread identity in request metadata. Supply a caller-owned request_id and the operation-specific args; the bridge preserves both and never retries writes.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -167,6 +238,52 @@ const tools = [
     }
   }))
 ];
+
+const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type JsonObject = Record<string, unknown>;
+type NativeCaller = { threadId: string };
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseTurnMetadata(value: unknown): JsonObject | undefined {
+  if (isJsonObject(value)) return value;
+  if (typeof value !== "string") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isJsonObject(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function nativeCaller(request: { params: { _meta?: unknown } }): NativeCaller | undefined {
+  const meta = request.params?._meta;
+  if (meta === undefined) return undefined;
+  if (!isJsonObject(meta)) throw new BridgeError("caller_identity_invalid", "MCP request metadata must be an object");
+  const rawThreadId = meta.threadId;
+  if (rawThreadId === undefined) return undefined;
+  if (typeof rawThreadId !== "string" || !THREAD_ID_PATTERN.test(rawThreadId)) {
+    throw new BridgeError("caller_identity_invalid", "MCP metadata threadId must be a UUID");
+  }
+  const turnMetadata = parseTurnMetadata(meta["x-codex-turn-metadata"]);
+  const turnThreadId = turnMetadata?.thread_id;
+  if (typeof turnThreadId === "string" && THREAD_ID_PATTERN.test(turnThreadId) && turnThreadId !== rawThreadId) {
+    throw new BridgeError("caller_identity_mismatch", "MCP metadata threadId does not match x-codex-turn-metadata.thread_id");
+  }
+  return { threadId: rawThreadId };
+}
+
+function requireNativePm(operation: ControlOperation, caller: NativeCaller | undefined, args: unknown): NativeCaller {
+  if ((operation === "pause" || operation === "resume") && isJsonObject(args) && args.scope === "service") {
+    throw new BridgeError("operator_required", "service pause and resume require the operator CLI");
+  }
+  if (!caller) {
+    throw new BridgeError("caller_identity_required", `${operation} requires Codex _meta.threadId; operator authentication is not a PM fallback`);
+  }
+  return caller;
+}
 
 function jsonResult(value: unknown) {
   return { content: [{ type: "text", text: JSON.stringify(value) }] };
@@ -187,19 +304,28 @@ async function runBridge(): Promise<void> {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
       const name = request.params.name;
+      const caller = nativeCaller(request as typeof request & { params: { _meta?: unknown } });
       if (name === "orchestration_diagnostics") return jsonResult(await validateConfig());
-      const client = await ManagedClient.fromConfig();
-      if (name === "orchestration_state") return jsonResult(await client.state());
+      if (name === "orchestration_state") {
+        const client = await ManagedClient.fromConfig(caller?.threadId);
+        return jsonResult(await client.state());
+      }
       if (name === "orchestration_events") {
+        const client = await ManagedClient.fromConfig(caller?.threadId);
         const args = request.params.arguments ?? {};
         return jsonResult(await client.events(args.after as number, args.wait_ms as number, args.limit as number));
       }
       const operation = name.replace(/^orchestration_/, "") as ControlOperation;
-      if (controlOperations.includes(operation)) {
+      if (operatorOnlyOperations.has(operation)) {
+        throw new BridgeError("operator_required", `${operation} requires the operator CLI`);
+      }
+      if (pmOperations.has(operation)) {
         const args = request.params.arguments ?? {};
-        if (!args || typeof args !== "object" || Array.isArray(args) || !("args" in args)) {
+        const pmCaller = requireNativePm(operation, caller, isJsonObject(args) ? args.args : undefined);
+        if (!isJsonObject(args) || !("args" in args)) {
           throw new BridgeError("args_invalid", "args is required and must be supplied by the caller");
         }
+        const client = await ManagedClient.fromConfig(pmCaller.threadId);
         return jsonResult(await client.control({
           request_id: args.request_id as string,
           operation,

@@ -8,7 +8,7 @@ import { once } from "node:events";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
-import { ManagedClient } from "../dist/client.js";
+import { ManagedClient, derivePmCredential } from "../dist/client.js";
 import { validateConfig } from "../dist/config.js";
 import { toWslPath } from "../dist/paths.js";
 
@@ -35,7 +35,7 @@ async function closeFixture(fixture) {
   await new Promise((resolve, reject) => fixture.close((error) => error ? reject(error) : resolve()));
 }
 
-async function startFixture(token, host = "127.0.0.1") {
+async function startFixture(token, host = "127.0.0.1", acceptedTokens = [token]) {
   const seen = [];
   let rejectAuth = false;
   let errorCode = "unauthorized";
@@ -48,7 +48,7 @@ async function startFixture(token, host = "127.0.0.1") {
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : undefined;
     seen.push({ method: request.method, url: request.url, body, authorization: request.headers.authorization });
     response.setHeader("content-type", "application/json");
-    if (rejectAuth || request.headers.authorization !== `Bearer ${token}`) {
+    if (rejectAuth || !acceptedTokens.some((accepted) => request.headers.authorization === `Bearer ${accepted}`)) {
       response.statusCode = errorStatus;
       response.end(JSON.stringify({ error: { code: errorCode, detail: token } }));
       return;
@@ -122,6 +122,20 @@ function readJsonLines(child) {
   });
 }
 
+function runProcess(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
+  });
+}
+
 test("bundled stdio bridge performs authenticated state, events, and controls", async (t) => {
   const token = "fixture-secret-token";
   const wslNode = process.platform === "win32" ? await resolveWslNode() : undefined;
@@ -130,7 +144,8 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
     : realpathSync.native(await mkdtemp(join(tmpdir(), "codex-orchestration-test-")));
   const tokenFile = process.platform === "win32" ? `${root}/token` : join(root, "token");
   const configFile = process.platform === "win32" ? `${root}/config.json` : join(root, "config.json");
-  const upstream = await startFixture(token);
+  const threadId = "018f4b48-8e5a-7f55-a2e8-0c1f5f9e6d72";
+  const upstream = await startFixture(token, "127.0.0.1", [token, derivePmCredential(token, threadId)]);
   const bridgeTokenFile = tokenFile;
   const bridgeConfigFile = configFile;
   const config = JSON.stringify({ host: "127.0.0.1", port: upstream.port, token_file: bridgeTokenFile });
@@ -166,20 +181,22 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   const names = listed.result.tools.map((tool) => tool.name);
   assert.deepEqual(names, [
     "orchestration_diagnostics", "orchestration_state", "orchestration_events",
-    "orchestration_bind_project", "orchestration_enroll", "orchestration_revise",
+    "orchestration_register_pm", "orchestration_claim", "orchestration_enroll", "orchestration_revise",
     "orchestration_pause", "orchestration_resume", "orchestration_interrupt",
-    "orchestration_cancel", "orchestration_review"
+    "orchestration_cancel", "orchestration_review", "orchestration_handoff"
   ]);
   const listedTools = new Map(listed.result.tools.map((tool) => [tool.name, tool]));
   const operationRequirements = {
-    orchestration_bind_project: ["expected_revision", "project"],
-    orchestration_enroll: ["expected_revision", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
-    orchestration_revise: ["expected_revision", "assignment_id", "changes"],
-    orchestration_pause: ["expected_revision"],
-    orchestration_resume: ["expected_revision"],
-    orchestration_interrupt: ["expected_revision", "assignment_id", "reason"],
-    orchestration_cancel: ["expected_revision", "assignment_id"],
-    orchestration_review: ["expected_revision", "assignment_id", "disposition"]
+    orchestration_register_pm: [],
+    orchestration_claim: ["project_id", "assignment_id", "expected_revision", "expected_ownership_revision"],
+    orchestration_enroll: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_fingerprint", "requirements_revision"],
+    orchestration_revise: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "changes"],
+    orchestration_pause: ["scope", "project_id", "assignments"],
+    orchestration_resume: ["scope", "project_id", "assignments"],
+    orchestration_interrupt: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "reason"],
+    orchestration_cancel: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id"],
+    orchestration_review: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "disposition"],
+    orchestration_handoff: ["project_id", "assignments", "destination_pm_id", "reason"]
   };
   for (const [name, required] of Object.entries(operationRequirements)) {
     const schema = listedTools.get(name).inputSchema;
@@ -201,20 +218,21 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   assert.deepEqual(JSON.parse(events.result.content[0].text), { events: [], latest_cursor: 7 });
   assert.equal(new URL(upstream.seen[1].url, "http://127.0.0.1").search, "?after=7&wait_ms=42&limit=100");
 
-  const missingArgs = await request(5, "tools/call", { name: "orchestration_pause", arguments: { request_id: "missing-args" } });
+  const metadata = { threadId, "x-codex-turn-metadata": { thread_id: threadId } };
+  const missingArgs = await request(5, "tools/call", { name: "orchestration_pause", _meta: metadata, arguments: { request_id: "missing-args" } });
   assert.equal(missingArgs.result.isError, true);
   assert.match(missingArgs.result.content[0].text, /args is required/);
 
-  const pauseArguments = { request_id: "pause-1", args: { expected_revision: 9, reason: "fixture" } };
-  await request(6, "tools/call", { name: "orchestration_pause", arguments: pauseArguments });
-  await request(7, "tools/call", { name: "orchestration_pause", arguments: pauseArguments });
+  const pauseArguments = { request_id: "pause-1", args: { scope: "assignments", project_id: "project-1", assignments: [{ assignment_id: "assignment-1", expected_revision: 9, expected_ownership_revision: 0 }], reason: "fixture" } };
+  await request(6, "tools/call", { name: "orchestration_pause", _meta: metadata, arguments: pauseArguments });
+  await request(7, "tools/call", { name: "orchestration_pause", _meta: metadata, arguments: pauseArguments });
   const writes = upstream.seen.filter((entry) => entry.method === "POST");
   assert.equal(writes.length, 2);
   assert.deepEqual(writes[0].body, writes[1].body);
   assert.equal(writes[0].body.request_id, "pause-1");
-  assert.equal(writes[0].body.args.expected_revision, 9);
+  assert.equal(writes[0].body.args.assignments[0].expected_revision, 9);
 
-  const stale = await request(8, "tools/call", { name: "orchestration_enroll", arguments: { request_id: "stale-1", args: { expected_revision: 8 } } });
+  const stale = await request(8, "tools/call", { name: "orchestration_enroll", _meta: metadata, arguments: { request_id: "stale-1", args: { expected_revision: 8 } } });
   assert.equal(stale.result.isError, true);
   assert.match(stale.result.content[0].text, /stale_revision/);
   assert.doesNotMatch(stale.result.content[0].text, new RegExp(token));
@@ -274,4 +292,123 @@ test("configuration validation rejects non-loopback and broad token permissions"
 test("Windows launcher conversion preserves spaces without shell interpolation", () => {
   assert.equal(toWslPath("C:\\Users\\Jordan Stevenson\\Codex Orchestration\\mcp\\server.mjs"), "/mnt/c/Users/Jordan Stevenson/Codex Orchestration/mcp/server.mjs");
   assert.throws(() => toWslPath("\\\\server\\share\\server.mjs"), /local Windows drive/);
+});
+
+test("native MCP metadata binds one private PM credential per Codex thread", async (t) => {
+  const token = "fixture-secret-token";
+  const threadA = "018f4b48-8e5a-7f55-a2e8-0c1f5f9e6d72";
+  const threadB = "018f4b48-8e5a-7f55-a2e8-0c1f5f9e6d73";
+  const pmA = derivePmCredential(token, threadA);
+  const pmB = derivePmCredential(token, threadB);
+  const upstream = await startFixture(token, "127.0.0.1", [token, pmA, pmB]);
+  const root = process.platform === "win32"
+    ? `/tmp/codex-orchestration-identity-${process.pid}-${Date.now()}`
+    : realpathSync.native(await mkdtemp(join(tmpdir(), "codex-orchestration-identity-")));
+  const tokenFile = process.platform === "win32" ? `${root}/token` : join(root, "token");
+  const configFile = process.platform === "win32" ? `${root}/config.json` : join(root, "config.json");
+  const config = JSON.stringify({ host: "127.0.0.1", port: upstream.port, token_file: tokenFile });
+  if (process.platform === "win32") {
+    const wslNode = await resolveWslNode();
+    await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", "/bin/mkdir", "-p", root]);
+    await writeWslFile(tokenFile, `${token}\n`, wslNode);
+    await writeWslFile(configFile, config, wslNode);
+  } else {
+    await writeFile(tokenFile, `${token}\n`);
+    await chmod(tokenFile, 0o600);
+    await writeFile(configFile, config);
+  }
+  const child = spawn(process.execPath, [join(process.cwd(), "mcp/server.mjs")], {
+    cwd: process.cwd(),
+    env: { ...process.env, CODEX_ORCHESTRATION_CONFIG: configFile },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  t.after(async () => {
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+      await once(child, "close");
+    }
+    await closeFixture(upstream.fixture);
+    if (process.platform === "win32") await removeWslPath(root);
+    else await rm(root, { recursive: true, force: true });
+  });
+
+  const request = readJsonLines(child);
+  await request(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} })}\n`);
+  const args = {
+    request_id: "identity-1",
+    args: {
+      scope: "assignments",
+      project_id: "project-1",
+      assignments: [{ assignment_id: "assignment-1", expected_revision: 9, expected_ownership_revision: 0 }],
+      owner: "spoofed-model-owner"
+    }
+  };
+  const callA = await request(2, "tools/call", { name: "orchestration_pause", _meta: { threadId: threadA, "x-codex-turn-metadata": { thread_id: threadA } }, arguments: args });
+  assert.equal(callA.result.isError, undefined);
+  const callB = await request(3, "tools/call", { name: "orchestration_pause", _meta: { threadId: threadB, "x-codex-turn-metadata": { thread_id: threadB } }, arguments: { ...args, request_id: "identity-2" } });
+  assert.equal(callB.result.isError, undefined);
+  const writes = upstream.seen.filter((entry) => entry.method === "POST");
+  assert.equal(writes.length, 2);
+  assert.equal(writes[0].authorization, `Bearer ${pmA}`);
+  assert.equal(writes[1].authorization, `Bearer ${pmB}`);
+  assert.notEqual(writes[0].authorization, writes[1].authorization);
+  assert.equal(writes[0].body.args.owner, "spoofed-model-owner");
+
+  const beforeMissing = writes.length;
+  const missing = await request(4, "tools/call", { name: "orchestration_pause", arguments: args });
+  assert.equal(missing.result.isError, true);
+  assert.match(missing.result.content[0].text, /caller_identity_required/);
+  assert.equal(upstream.seen.filter((entry) => entry.method === "POST").length, beforeMissing);
+
+  const mismatch = await request(5, "tools/call", { name: "orchestration_pause", _meta: { threadId: threadA, "x-codex-turn-metadata": { thread_id: threadB } }, arguments: args });
+  assert.equal(mismatch.result.isError, true);
+  assert.match(mismatch.result.content[0].text, /caller_identity_mismatch/);
+  assert.equal(upstream.seen.filter((entry) => entry.method === "POST").length, beforeMissing);
+});
+
+test("operator CLI sends a private control envelope once with the install credential", async (t) => {
+  const token = "fixture-secret-token";
+  const upstream = await startFixture(token);
+  const root = await mkdtemp(join(tmpdir(), "codex-orchestration-control-"));
+  const tokenFile = join(root, "token");
+  const configFile = join(root, "config.json");
+  const inputFile = join(root, "control.json");
+  await writeFile(tokenFile, `${token}\n`);
+  if (process.platform !== "win32") await chmod(tokenFile, 0o600);
+  await writeFile(configFile, JSON.stringify({ host: "127.0.0.1", port: upstream.port, token_file: tokenFile }));
+  await writeFile(inputFile, JSON.stringify({
+    request_id: "operator-pause-1",
+    operation: "pause",
+    args: { scope: "service", reason: "fixture" }
+  }));
+  t.after(async () => {
+    await closeFixture(upstream.fixture);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const result = await runProcess(process.execPath, [join(process.cwd(), "dist/cli.js"), "control", "--input", inputFile], {
+    cwd: process.cwd(),
+    env: { ...process.env, CODEX_ORCHESTRATION_CONFIG: configFile }
+  });
+  assert.equal(result.code, 0);
+  assert.deepEqual(JSON.parse(result.stdout), { accepted: true, request_id: "operator-pause-1" });
+  assert.doesNotMatch(result.stdout, new RegExp(token));
+  const writes = upstream.seen.filter((entry) => entry.method === "POST");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].authorization, `Bearer ${token}`);
+  assert.deepEqual(writes[0].body, {
+    request_id: "operator-pause-1",
+    operation: "pause",
+    args: { scope: "service", reason: "fixture" }
+  });
+
+  await writeFile(inputFile, JSON.stringify({ request_id: "pm-1", operation: "enroll", args: {} }));
+  const rejected = await runProcess(process.execPath, [join(process.cwd(), "dist/cli.js"), "control", "--input", inputFile], {
+    cwd: process.cwd(),
+    env: { ...process.env, CODEX_ORCHESTRATION_CONFIG: configFile }
+  });
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.stderr, /operator_required/);
+  assert.equal(upstream.seen.filter((entry) => entry.method === "POST").length, 1);
 });
