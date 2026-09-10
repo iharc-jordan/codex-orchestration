@@ -542,7 +542,7 @@ async function managedControl(paths: LifecyclePaths, operation: "pause" | "resum
     }
   }
   if (!state || !Number.isInteger(state.revision)) throw new LifecycleError("state_invalid", "managed state did not include a current revision");
-  return client.control({ request_id: requestId(operation), operation, args: { expected_revision: state.revision, disable } });
+  return client.control({ request_id: requestId(operation), operation, args: { scope: "service", expected_revision: state.revision, disable } });
 }
 
 async function setupWindows(options: LifecycleOptions): Promise<LifecyclePaths> {
