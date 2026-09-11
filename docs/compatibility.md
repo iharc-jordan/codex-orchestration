@@ -4,8 +4,8 @@ The local MVP targets Windows with Ubuntu WSL2 and native Ubuntu Linux. Workers
 and the Symphony service execute in Linux. Windows hosts the Codex PM and the
 stdio bridge launcher.
 
-The required pairing is plugin `v0.2.0` with Symphony runtime binary
-`0.2.0-mvp.2`. Build the runtime from the current managed-state version 2 source and keep the
+The current local iteration pairs plugin `v0.2.0` with Symphony runtime binary
+`0.2.0-mvp.3`. Build the runtime from the current managed-state version 2 source and keep the
 plugin, executable, and state format on that matching pair. There is no public
 marketplace entry or release artifact, and this document makes no production,
 PM pilot, or model-performance claim.
@@ -20,7 +20,7 @@ PM pilot, or model-performance claim.
 | GitHub CLI | 2.100.0 | Linux Projects and repository reads |
 | Node.js | 24.15.0 Windows; 24.13.1 Linux | Bridge development and focused tests |
 | Symphony source | Current managed-state version 2 source checkout | Required source for the matching local runtime build; no public release receipt |
-| Installed Symphony binary | `0.2.0-mvp.2` | Required local MVP executable; installation and delivery evidence remain to be collected |
+| Installed Symphony binary | `0.2.0-mvp.3` | Required local iteration executable; installation and delivery evidence remain to be collected |
 | Current local plugin | `0.2.0` | Managed MVP bridge; no public artifact, production verification, PM pilot, or model-performance result |
 | Elixir / OTP | Repository-pinned mise toolchain | Build and full upstream checks |
 
@@ -44,7 +44,7 @@ Windows sleep, shutdown and explicit WSL termination interrupt execution. Recove
 
 Validate the installation and lifecycle with local checks. Exercise worker
 delivery and recovery during a user-selected real job with the matching
-`0.2.0-mvp.2` executable and managed-state version 2. Do not launch synthetic
+`0.2.0-mvp.3` executable and managed-state version 2. Do not launch synthetic
 model tasks to test this candidate. Local checks alone do not establish
 delivery quality or model performance.
 
@@ -64,5 +64,5 @@ the validation boundaries below.
 
 No public artifact, production deployment, PM pilot, or model-performance test
 result is claimed. Before a real job, validate the matching plugin and
-`0.2.0-mvp.2` executable from current managed-state version 2 source, then retain the
+`0.2.0-mvp.3` executable from current managed-state version 2 source, then retain the
 installation, lifecycle, recovery, and delivery evidence with the local run.

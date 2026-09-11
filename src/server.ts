@@ -2,7 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { asBridgeError, BridgeError, ControlArgs, ControlOperation, ManagedClient } from "./client.js";
+import { asBridgeError, BridgeError, ControlArgs, ControlOperation, ManagedClient, type ManagedStateArgs } from "./client.js";
 import { validateConfig } from "./config.js";
 import { assertMcpEntrypoint, resolvedScriptPath, toWslPath } from "./paths.js";
 
@@ -50,6 +50,23 @@ const routeProperty = {
   },
   required: ["model", "effort"],
   additionalProperties: false
+};
+const peerReportRefSchema = {
+  type: "object",
+  properties: {
+    source_assignment_id: { type: "string", minLength: 1 },
+    source_attempt_id: { type: "string", minLength: 1 },
+    report_id: { type: "string", minLength: 1 }
+  },
+  required: ["source_assignment_id", "source_attempt_id", "report_id"],
+  additionalProperties: false
+};
+const peerReportRefsProperty = {
+  type: "array",
+  maxItems: 8,
+  uniqueItems: true,
+  items: peerReportRefSchema,
+  description: "Optional references to bounded peer reports. The runtime verifies project, attempt, report, and revision scope; references are evidence, not authorization."
 };
 
 const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
@@ -184,6 +201,7 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
       assignment_id: assignmentIdProperty,
       disposition: { type: "string", enum: ["accepted", "rework", "waiting", "blocked"] },
       evidence: { type: "array", items: { type: "string", minLength: 1 } },
+      peer_report_refs: peerReportRefsProperty,
       reason: { type: "string" }
     },
     required: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "disposition"],
@@ -221,8 +239,21 @@ const tools = [
   },
   {
     name: "orchestration_state",
-    description: "Read managed Symphony state. Without Codex _meta.threadId this uses operator authentication and cannot identify a PM.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false }
+    description: "Read managed Symphony state. Summary is the default compact view; detail requires assignment_id and full is an explicit diagnostic view. Without Codex _meta.threadId this uses operator authentication and cannot identify a PM.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        view: { type: "string", enum: ["summary", "detail", "full"], default: "summary" },
+        project_id: { type: "string", minLength: 1, description: "Optional Project scope for the state read." },
+        assignment_id: { type: "string", minLength: 1, description: "Optional assignment scope; required for the detail view." },
+        include_history: { type: "boolean", default: false, description: "Include historical assignment records when supported by the selected view; detail already includes the selected assignment's full reports." }
+      },
+      allOf: [{
+        if: { required: ["view"], properties: { view: { const: "detail" } } },
+        then: { required: ["assignment_id"] }
+      }],
+      additionalProperties: false
+    }
   },
   {
     name: "orchestration_events",
@@ -322,7 +353,8 @@ async function runBridge(): Promise<void> {
       if (name === "orchestration_diagnostics") return jsonResult(await validateConfig());
       if (name === "orchestration_state") {
         const client = await ManagedClient.fromConfig(caller?.threadId);
-        return jsonResult(await client.state());
+        const args = request.params.arguments ?? {};
+        return jsonResult(await client.state(args as ManagedStateArgs));
       }
       if (name === "orchestration_events") {
         const client = await ManagedClient.fromConfig(caller?.threadId);

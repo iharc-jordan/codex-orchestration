@@ -4,7 +4,7 @@ A Codex plugin for an Astra PM working with a persistent pool of 5.6 workers,
 using OpenAI Symphony on Ubuntu and GitHub Projects for workflow state.
 
 This checkout contains the local managed MVP: plugin `v0.2.0` with Symphony
-runtime binary `0.2.0-mvp.1`. The runtime must be built from the current
+runtime binary `0.2.0-mvp.3`. The runtime must be built from the current
 managed-state version 2 source and used with this plugin version; older runtime releases and
 state formats are not compatible with these instructions. There is no public
 marketplace entry or release artifact, and this README makes no PM pilot or
@@ -33,7 +33,7 @@ unlocks dependent assignments.
 
 Install the plugin from this local checkout. The current MVP requires a
 matching Symphony build from the current managed-state version 2 source and runtime binary
-version `0.2.0-mvp.1`:
+version `0.2.0-mvp.3`:
 
 ```shell
 codex plugin marketplace add /path/to/codex-orchestration
@@ -81,7 +81,8 @@ The MVP exposes ten native PM operations through the bridge:
 `register_pm`, `claim`, `enroll`, `revise`, `pause`, `resume`, `interrupt`,
 `cancel`, `review`, and `handoff`. The operator CLI adds `bind_project`,
 service pause/resume, and `operator_takeover`. The bridge does not add a second
-scheduler or assignment store.
+scheduler or assignment store. Including diagnostics, scoped state views, and
+bounded event reads, the bridge publishes 13 tools.
 
 PM identity comes from trusted Codex task metadata. `assignment_id` is the
 GitHub Project item ID, and PM operations include the explicit `project_id`.
@@ -98,6 +99,14 @@ handoff use a fenced `assignments` list; a handoff names a registered recipient
 and preserves a healthy worker's attempt identity while transferring PM
 responsibility. Review remains a PM control and requires evidence tied to the
 current assignment and attempt.
+
+The default state read is a compact summary. PMs can request one assignment's
+detail, or an explicit full diagnostic view, with optional Project and assignment
+filters. Review feedback may carry up to eight `peer_report_refs` entries
+(`source_assignment_id`, `source_attempt_id`, and `report_id`) at a normal
+rework or waiting boundary. The runtime resolves these existing reports for the
+recipient's next turn; peer findings remain evidence and do not grant authority
+or expand scope.
 
 ## Documentation and development
 

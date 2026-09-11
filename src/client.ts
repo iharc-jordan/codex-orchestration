@@ -4,6 +4,7 @@ import { BridgeConfig, ConfigError, loadConfig, readToken } from "./config.js";
 export type ControlOperation = "bind_project" | "enroll" | "register_pm" | "claim" | "revise" | "pause" | "resume" | "interrupt" | "cancel" | "review" | "handoff" | "operator_takeover";
 export type ManagedPhase = "ready" | "active" | "review" | "accepted" | "waiting" | "cancelled";
 export type ReviewDisposition = "accepted" | "rework" | "waiting" | "blocked";
+export type ManagedStateView = "summary" | "detail" | "full";
 
 export interface WorkerRoute {
   model: string;
@@ -29,6 +30,38 @@ export interface ManagedAssignment {
   revision?: number;
   control_revision?: number;
   route?: WorkerRoute;
+  ownership?: { pm_id?: string | null; status?: string; ownership_revision?: number; [key: string]: unknown } | null;
+  wait_reason?: string | null;
+  last_report?: ManagedReport | null;
+  reports?: Record<string, ManagedReport>;
+  evidence?: string[];
+  [key: string]: unknown;
+}
+
+export interface ManagedReport {
+  report_id?: string;
+  attempt_id?: string;
+  kind?: string;
+  summary?: string;
+  evidence?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface ManagedProjectState {
+  project_id?: string;
+  [key: string]: unknown;
+}
+
+export interface ManagedUsage {
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  cumulative_tokens?: number;
+  inflight_tokens?: number;
+  baseline_tokens?: number;
+  overshoot_tokens?: number;
+  cap_reached?: boolean;
   [key: string]: unknown;
 }
 
@@ -36,11 +69,25 @@ export interface ManagedState {
   revision: number;
   cursor?: number;
   latest_cursor?: number;
-  paused: boolean;
-  disabled: boolean;
-  binding: ProjectBinding | null;
-  assignments: Record<string, ManagedAssignment>;
+  control_revision?: number;
+  paused?: boolean;
+  disabled?: boolean;
+  binding?: ProjectBinding | null;
+  principal?: { principal_id?: string; [key: string]: unknown } | null;
+  projects?: Record<string, ManagedProjectState>;
+  usage?: ManagedUsage;
+  assignments?: Record<string, ManagedAssignment>;
+  assignment?: ManagedAssignment;
+  project?: ManagedProjectState;
+  events?: ManagedEvent[];
   [key: string]: unknown;
+}
+
+export interface ManagedStateArgs {
+  view?: ManagedStateView;
+  project_id?: string;
+  assignment_id?: string;
+  include_history?: boolean;
 }
 
 export interface ManagedEvent {
@@ -133,6 +180,13 @@ export interface ReviewArgs extends RevisionArgs {
   expected_ownership_revision: number;
   disposition: ReviewDisposition;
   evidence: string[];
+  peer_report_refs?: PeerReportRef[];
+}
+
+export interface PeerReportRef {
+  source_assignment_id: string;
+  source_attempt_id: string;
+  report_id: string;
 }
 
 export interface RegisterPmArgs {
@@ -228,6 +282,36 @@ function safeMessage(status: number, body: unknown, token: string): string {
   return `Symphony request failed with HTTP ${status}`;
 }
 
+const MANAGED_STATE_VIEWS = new Set<ManagedStateView>(["summary", "detail", "full"]);
+
+function stateQuery(args: ManagedStateArgs): string {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new BridgeError("state_args_invalid", "state arguments must be an object");
+  }
+  if (args.view !== undefined && (typeof args.view !== "string" || !MANAGED_STATE_VIEWS.has(args.view as ManagedStateView))) {
+    throw new BridgeError("state_view_invalid", "view must be summary, detail, or full");
+  }
+  for (const [name, value] of [["project_id", args.project_id], ["assignment_id", args.assignment_id]] as const) {
+    if (value !== undefined && (typeof value !== "string" || value.trim() === "")) {
+      throw new BridgeError("state_filter_invalid", `${name} must be a non-empty string`);
+    }
+  }
+  if (args.include_history !== undefined && typeof args.include_history !== "boolean") {
+    throw new BridgeError("state_history_invalid", "include_history must be a boolean");
+  }
+  if (args.view === "detail" && args.assignment_id === undefined) {
+    throw new BridgeError("state_assignment_required", "detail state requires assignment_id");
+  }
+
+  const query = new URLSearchParams();
+  if (args.view !== undefined) query.set("view", args.view);
+  if (args.project_id !== undefined) query.set("project_id", args.project_id);
+  if (args.assignment_id !== undefined) query.set("assignment_id", args.assignment_id);
+  if (args.include_history !== undefined) query.set("include_history", String(args.include_history));
+  const encoded = query.toString();
+  return encoded ? `?${encoded}` : "";
+}
+
 export class ManagedClient {
   private readonly authorizationToken: string;
 
@@ -246,8 +330,9 @@ export class ManagedClient {
     return new ManagedClient(config, await readToken(config), trustedThreadId);
   }
 
-  async state(): Promise<ManagedState> {
-    return this.request("/api/v1/managed/state", { method: "GET" }) as Promise<ManagedState>;
+  async state(args: ManagedStateArgs = {}): Promise<ManagedState> {
+    const query = stateQuery(args);
+    return this.request(`/api/v1/managed/state${query}`, { method: "GET" }) as Promise<ManagedState>;
   }
 
   async events(after: number, waitMs: number, limit: number): Promise<ManagedEvents> {

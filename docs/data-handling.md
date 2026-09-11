@@ -9,6 +9,10 @@ GitHub Projects holds workflow status. Repository issues hold assignment objecti
 - Managed Codex sessions receive the assignment context and workspace information necessary for the authorized work. Codex and GitHub continue to apply their own account and service terms.
 - Linux workspaces contain repository checkouts and worker changes. Codex may retain local thread history through its existing installation so the service can resume the recorded conversation.
 - The operational journal records assignment revisions, generations, attempt/thread/process/workspace identity, routes, pause and blocker state, turn reservations, usage baselines, event cursors, reports and external-effect intent/outcome. It is not a copy of the full issue database or conversation transcript.
+- Peer findings use references to the canonical source assignment, attempt, and
+  report (`peer_report_refs`) rather than copied report text. Resolve them only
+  for the recipient's scoped next turn after the runtime checks project,
+  ownership, attempt, and revision boundaries.
 
 Keep authentication files, the API token, local configuration and operational records outside repository content. Exclude private assignments, unsanitized logs and pilot artifacts from public source and releases. Reports should reference the minimum evidence needed for review; repository paths, issue identifiers and report text may themselves be sensitive.
 

@@ -28,6 +28,14 @@ test("managed contract fixture covers the typed bridge envelope without private 
     assignments: {}
   });
   assert.deepEqual(http.events.response, { after: 0, events: [], cursor: 0 });
+  assert.deepEqual(Object.keys(http.state_views), ["summary", "detail", "full"]);
+  assert.equal(http.state_views.summary.path, "/api/v1/managed/state?view=summary&project_id=PVT_one");
+  assert.equal(http.state_views.detail.path, "/api/v1/managed/state?view=detail&project_id=PVT_one&assignment_id=item-one&include_history=true");
+  assert.equal(http.state_views.full.path, "/api/v1/managed/state?view=full&include_history=true");
+  assert.deepEqual(http.state_views.summary.response.assignments["item-one"].last_report, { report_id: "report-fixture-1", attempt_id: "managed-item-one-attempt-1" });
+  assert.equal(http.state_views.summary.response.assignments["item-one"].ownership.ownership_revision, 1);
+  assert.equal(http.state_views.detail.response.assignment.reports["report-fixture-1"].kind, "result");
+  assert.equal(http.state_views.detail.response.project.project_id, "PVT_one");
   for (const operation of operations) {
     const example = http[operation];
     assert.equal(example.method, "POST");
@@ -52,6 +60,12 @@ test("managed contract fixture covers the typed bridge envelope without private 
   assert.equal(typeof http.enroll.body.args.route.model, "string");
   assert.equal(http.enroll.body.args.resources[0].kind, "repository");
   assert.equal(typeof http.review.body.args.disposition, "string");
+  assert.deepEqual(http.review_peer_refs.body.args.peer_report_refs, [{
+    source_assignment_id: "item-one",
+    source_attempt_id: "managed-item-one-attempt-1",
+    report_id: "report-fixture-1"
+  }]);
+  assert.equal(http.review_peer_refs.body.args.disposition, "rework");
   assert.doesNotMatch(JSON.stringify(fixture), /iharc-jordan|\/run\/symphony-managed|\/var\/lib\/symphony-managed/);
 });
 

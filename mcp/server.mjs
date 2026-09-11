@@ -16916,6 +16916,33 @@ function safeMessage(status, body, token) {
   }
   return `Symphony request failed with HTTP ${status}`;
 }
+var MANAGED_STATE_VIEWS = /* @__PURE__ */ new Set(["summary", "detail", "full"]);
+function stateQuery(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new BridgeError("state_args_invalid", "state arguments must be an object");
+  }
+  if (args.view !== void 0 && (typeof args.view !== "string" || !MANAGED_STATE_VIEWS.has(args.view))) {
+    throw new BridgeError("state_view_invalid", "view must be summary, detail, or full");
+  }
+  for (const [name, value] of [["project_id", args.project_id], ["assignment_id", args.assignment_id]]) {
+    if (value !== void 0 && (typeof value !== "string" || value.trim() === "")) {
+      throw new BridgeError("state_filter_invalid", `${name} must be a non-empty string`);
+    }
+  }
+  if (args.include_history !== void 0 && typeof args.include_history !== "boolean") {
+    throw new BridgeError("state_history_invalid", "include_history must be a boolean");
+  }
+  if (args.view === "detail" && args.assignment_id === void 0) {
+    throw new BridgeError("state_assignment_required", "detail state requires assignment_id");
+  }
+  const query = new URLSearchParams();
+  if (args.view !== void 0) query.set("view", args.view);
+  if (args.project_id !== void 0) query.set("project_id", args.project_id);
+  if (args.assignment_id !== void 0) query.set("assignment_id", args.assignment_id);
+  if (args.include_history !== void 0) query.set("include_history", String(args.include_history));
+  const encoded = query.toString();
+  return encoded ? `?${encoded}` : "";
+}
 var ManagedClient = class _ManagedClient {
   constructor(config2, operatorToken, trustedThreadId) {
     this.config = config2;
@@ -16929,8 +16956,9 @@ var ManagedClient = class _ManagedClient {
     const config2 = await loadConfig();
     return new _ManagedClient(config2, await readToken(config2), trustedThreadId);
   }
-  async state() {
-    return this.request("/api/v1/managed/state", { method: "GET" });
+  async state(args = {}) {
+    const query = stateQuery(args);
+    return this.request(`/api/v1/managed/state${query}`, { method: "GET" });
   }
   async events(after, waitMs, limit) {
     if (!Number.isInteger(after) || after < 0) throw new BridgeError("events_after_invalid", "after must be a non-negative integer");
@@ -17051,6 +17079,23 @@ var routeProperty = {
   },
   required: ["model", "effort"],
   additionalProperties: false
+};
+var peerReportRefSchema = {
+  type: "object",
+  properties: {
+    source_assignment_id: { type: "string", minLength: 1 },
+    source_attempt_id: { type: "string", minLength: 1 },
+    report_id: { type: "string", minLength: 1 }
+  },
+  required: ["source_assignment_id", "source_attempt_id", "report_id"],
+  additionalProperties: false
+};
+var peerReportRefsProperty = {
+  type: "array",
+  maxItems: 8,
+  uniqueItems: true,
+  items: peerReportRefSchema,
+  description: "Optional references to bounded peer reports. The runtime verifies project, attempt, report, and revision scope; references are evidence, not authorization."
 };
 var operationArgSchemas = {
   bind_project: {
@@ -17184,6 +17229,7 @@ var operationArgSchemas = {
       assignment_id: assignmentIdProperty,
       disposition: { type: "string", enum: ["accepted", "rework", "waiting", "blocked"] },
       evidence: { type: "array", items: { type: "string", minLength: 1 } },
+      peer_report_refs: peerReportRefsProperty,
       reason: { type: "string" }
     },
     required: ["expected_revision", "expected_ownership_revision", "project_id", "assignment_id", "disposition"],
@@ -17220,8 +17266,21 @@ var tools = [
   },
   {
     name: "orchestration_state",
-    description: "Read managed Symphony state. Without Codex _meta.threadId this uses operator authentication and cannot identify a PM.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false }
+    description: "Read managed Symphony state. Summary is the default compact view; detail requires assignment_id and full is an explicit diagnostic view. Without Codex _meta.threadId this uses operator authentication and cannot identify a PM.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        view: { type: "string", enum: ["summary", "detail", "full"], default: "summary" },
+        project_id: { type: "string", minLength: 1, description: "Optional Project scope for the state read." },
+        assignment_id: { type: "string", minLength: 1, description: "Optional assignment scope; required for the detail view." },
+        include_history: { type: "boolean", default: false, description: "Include historical assignment records when supported by the selected view; detail already includes the selected assignment's full reports." }
+      },
+      allOf: [{
+        if: { required: ["view"], properties: { view: { const: "detail" } } },
+        then: { required: ["assignment_id"] }
+      }],
+      additionalProperties: false
+    }
   },
   {
     name: "orchestration_events",
@@ -17310,7 +17369,8 @@ async function runBridge() {
       if (name === "orchestration_diagnostics") return jsonResult(await validateConfig());
       if (name === "orchestration_state") {
         const client = await ManagedClient.fromConfig(caller?.threadId);
-        return jsonResult(await client.state());
+        const args = request.params.arguments ?? {};
+        return jsonResult(await client.state(args));
       }
       if (name === "orchestration_events") {
         const client = await ManagedClient.fromConfig(caller?.threadId);

@@ -22,11 +22,52 @@
       },
       "additionalProperties": false
     },
+    "state_query": {
+      "type": "object",
+      "properties": {
+        "view": { "enum": ["summary", "detail", "full"], "default": "summary" },
+        "project_id": { "type": "string", "minLength": 1 },
+        "assignment_id": { "type": "string", "minLength": 1 },
+        "include_history": { "type": "boolean", "default": false }
+      },
+      "allOf": [{
+        "if": { "required": ["view"], "properties": { "view": { "const": "detail" } } },
+        "then": { "required": ["assignment_id"] }
+      }],
+      "additionalProperties": false
+    },
+    "peer_report_ref": {
+      "$ref": "#/$defs/peer_report_ref"
+    },
+    "review_feedback": {
+      "type": "object",
+      "properties": {
+        "peer_report_refs": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/peer_report_ref" }
+        }
+      },
+      "additionalProperties": true
+    },
     "error_codes": {
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1,
       "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "peer_report_ref": {
+      "type": "object",
+      "required": ["source_assignment_id", "source_attempt_id", "report_id"],
+      "properties": {
+        "source_assignment_id": { "type": "string", "minLength": 1 },
+        "source_attempt_id": { "type": "string", "minLength": 1 },
+        "report_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

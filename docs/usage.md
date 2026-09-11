@@ -8,8 +8,8 @@ authorization. Desktop-only worker parity and a new messaging service are out of
 scope. Keep one current assignment description and one current implementation
 path; remove superseded behavior instead of retaining parallel old/new paths.
 
-The local MVP pairing is plugin `v0.2.0` with Symphony runtime binary
-`0.2.0-mvp.1`. Use a Symphony executable built from the current managed-state version 2 source
+The current local iteration pairs plugin `v0.2.0` with Symphony runtime binary
+`0.2.0-mvp.3`. Use a Symphony executable built from the current managed-state version 2 source
 with this plugin. There is no public runtime artifact or production pilot; use
 the local checkout and the [fresh-task acceptance note](fresh-task-test.md).
 
@@ -19,7 +19,7 @@ scheduler.
 
 The first setup uses an explicit Symphony executable built from the current
 managed-state version 2 source and a private workflow file. Set its application version to
-`0.2.0-mvp.1`; an older runtime or state format is incompatible. On Linux, mark
+`0.2.0-mvp.3`; an older runtime or state format is incompatible. On Linux, mark
 the executable with `chmod +x symphony_linux_x86_64`. Windows users should place
 it in their Ubuntu WSL home and pass its Linux path to setup. See the
 [build instructions](release.md) for the local runtime build.
@@ -27,7 +27,7 @@ Use the [generic workflow example](../fixtures/WORKFLOW.example.md) as a startin
 point and replace its paths and Project owner before setup:
 
 ```text
-node ./mcp/cli.mjs setup --executable /path/to/symphony_linux_x86_64 --workflow /path/to/WORKFLOW.md --version 0.2.0-mvp.1 --port 8787
+node ./mcp/cli.mjs setup --executable /path/to/symphony_linux_x86_64 --workflow /path/to/WORKFLOW.md --version 0.2.0-mvp.3 --port 8787
 ```
 
 Setup creates separate XDG configuration, data, and state roots. Configuration
@@ -39,8 +39,8 @@ installs the owned service assets but does not enable or resume execution.
 Run these commands from the installed plugin directory (reported by
 `codex plugin add --json`) or this local checkout. Setup stages an
 immutable release label; use a new label when upgrading to a changed executable.
-The `0.2.0-mvp.1` label identifies the matching local runtime; it is not a
-published version.
+The `0.2.0-mvp.3` label identifies the matching local iteration runtime; it is
+not a published version or production support claim.
 
 On Windows, setup delegates these Linux-owned roots and service operations to
 Ubuntu WSL. The installed bridge also runs its Linux Node process in Ubuntu, so
@@ -56,7 +56,7 @@ node ./mcp/cli.mjs start
 node ./mcp/cli.mjs pause
 node ./mcp/cli.mjs resume
 node ./mcp/cli.mjs stop
-node ./mcp/cli.mjs upgrade --executable /path/to/new/bin/symphony --version 0.2.0-mvp.1
+node ./mcp/cli.mjs upgrade --executable /path/to/new/bin/symphony --version 0.2.0-mvp.3
 node ./mcp/cli.mjs rollback
 node ./mcp/cli.mjs uninstall
 ```
@@ -123,8 +123,26 @@ PM ownership controls. Native PM tools are
 `orchestration_register_pm`, `orchestration_claim`, `orchestration_enroll`,
 `orchestration_revise`, `orchestration_pause`, `orchestration_resume`,
 `orchestration_interrupt`, `orchestration_cancel`, `orchestration_review`, and
-`orchestration_handoff`. Each call carries a caller-owned `request_id`; the
-bridge preserves the exact request and does not retry an uncertain write.
+`orchestration_handoff`. The bridge also exposes diagnostics, compact scoped
+state views, and bounded event reads. Each call carries a caller-owned
+`request_id`; the bridge preserves the exact request and does not retry an
+uncertain write.
+
+Read managed state with `orchestration_state` using its default compact summary.
+Use `view: "detail"` with an `assignment_id` when reviewing one assignment's
+evidence, and use `view: "full"` only for an explicit diagnostic read. Optional
+`project_id` and `assignment_id` filters scope the response; `include_history`
+requests historical assignment records when the selected view supports them;
+detail already includes the selected assignment's full reports.
+The runtime remains the authority for project, assignment, ownership, and
+history access checks.
+
+At a normal `rework` or `waiting` review boundary, the PM may pass up to eight
+`peer_report_refs` entries in review feedback. Each reference names the source
+assignment, source attempt, and report ID. The runtime resolves those references
+from canonical reports for the recipient's next turn and rejects stale,
+missing, cross-project, or out-of-scope references. Peer findings are evidence
+and cannot authorize work, change ownership, or override the current assignment.
 
 Use the Project item ID as `assignment_id` and include the explicit
 `project_id`. Enrollment resources are typed references, for example:
@@ -161,8 +179,9 @@ names a registered `destination_pm_id`; it transfers PM responsibility while
 preserving a healthy worker's attempt identity. The recipient continues from
 the current assignment state.
 
-These controls require the matching `0.2.0-mvp.1` Symphony build from current
-managed-state version 2 source. No public MVP artifact or production support is claimed.
+These controls require the matching `0.2.0-mvp.3` Symphony build from current
+managed-state version 2 source. Scoped state and peer-report support are part of
+this local iteration; no public artifact or production support is claimed.
 
 ## Trusted assignment checkout
 
@@ -257,7 +276,7 @@ disposable plugin cache.
 
 - If orchestration tools are missing from a desktop task, verify the plugin is
   enabled with `codex plugin list`. A fresh native Codex App Server connection
-  discovered all 11 tools in validation, while an already running desktop client
+  discovered all 13 tools in validation, while an already running desktop client
   omitted them after installation. Refresh the client when convenient; do not
   reset service state or enroll a second assignment to address tool discovery.
 - `config_missing` means the bridge launched but cannot find its Linux

@@ -186,6 +186,12 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
     "orchestration_cancel", "orchestration_review", "orchestration_handoff"
   ]);
   const listedTools = new Map(listed.result.tools.map((tool) => [tool.name, tool]));
+  const stateSchema = listedTools.get("orchestration_state").inputSchema;
+  assert.deepEqual(stateSchema.properties.view.enum, ["summary", "detail", "full"]);
+  assert.equal(stateSchema.properties.view.default, "summary");
+  assert.equal(stateSchema.properties.include_history.default, false);
+  assert.deepEqual(stateSchema.allOf[0].then.required, ["assignment_id"]);
+  assert.equal(stateSchema.additionalProperties, false);
   const operationRequirements = {
     orchestration_register_pm: [],
     orchestration_claim: ["project_id", "assignment_id", "expected_revision", "expected_ownership_revision"],
@@ -205,6 +211,12 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
     assert.deepEqual(schema.properties.args.required, required);
   }
   assert.deepEqual(listedTools.get("orchestration_review").inputSchema.properties.args.properties.disposition.enum, ["accepted", "rework", "waiting", "blocked"]);
+  const peerReportRefs = listedTools.get("orchestration_review").inputSchema.properties.args.properties.peer_report_refs;
+  assert.equal(peerReportRefs.type, "array");
+  assert.equal(peerReportRefs.maxItems, 8);
+  assert.equal(peerReportRefs.uniqueItems, true);
+  assert.deepEqual(peerReportRefs.items.required, ["source_assignment_id", "source_attempt_id", "report_id"]);
+  assert.equal(peerReportRefs.items.additionalProperties, false);
   assert.deepEqual(listedTools.get("orchestration_enroll").inputSchema.properties.args.properties.route.properties.model.enum, ["gpt-5.6-luna", "gpt-5.6-terra"]);
   const enrollSchema = listedTools.get("orchestration_enroll").inputSchema.properties.args.properties;
   assert.equal(enrollSchema.escalation_reason.type, "string");
@@ -221,9 +233,23 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
 
   const state = await request(3, "tools/call", { name: "orchestration_state", arguments: {} });
   assert.deepEqual(JSON.parse(state.result.content[0].text), { state: "READY", revision: 9, latest_cursor: 7 });
+  const summary = await request(11, "tools/call", { name: "orchestration_state", arguments: { view: "summary", project_id: "project one", include_history: false } });
+  assert.deepEqual(JSON.parse(summary.result.content[0].text), { state: "READY", revision: 9, latest_cursor: 7 });
+  const detail = await request(12, "tools/call", { name: "orchestration_state", arguments: { view: "detail", project_id: "project one", assignment_id: "assignment/one", include_history: true } });
+  assert.deepEqual(JSON.parse(detail.result.content[0].text), { state: "READY", revision: 9, latest_cursor: 7 });
+  const full = await request(13, "tools/call", { name: "orchestration_state", arguments: { view: "full", include_history: true } });
+  assert.deepEqual(JSON.parse(full.result.content[0].text), { state: "READY", revision: 9, latest_cursor: 7 });
+  const stateGets = upstream.seen.filter((entry) => entry.method === "GET" && entry.url?.startsWith("/api/v1/managed/state"));
+  assert.equal(new URL(stateGets[1].url, "http://127.0.0.1").search, "?view=summary&project_id=project+one&include_history=false");
+  assert.equal(new URL(stateGets[2].url, "http://127.0.0.1").search, "?view=detail&project_id=project+one&assignment_id=assignment%2Fone&include_history=true");
+  assert.equal(new URL(stateGets[3].url, "http://127.0.0.1").search, "?view=full&include_history=true");
+  const invalidDetail = await request(14, "tools/call", { name: "orchestration_state", arguments: { view: "detail" } });
+  assert.equal(invalidDetail.result.isError, true);
+  assert.match(invalidDetail.result.content[0].text, /state_assignment_required/);
   const events = await request(4, "tools/call", { name: "orchestration_events", arguments: { after: 7, wait_ms: 42, limit: 100 } });
   assert.deepEqual(JSON.parse(events.result.content[0].text), { events: [], latest_cursor: 7 });
-  assert.equal(new URL(upstream.seen[1].url, "http://127.0.0.1").search, "?after=7&wait_ms=42&limit=100");
+  const eventGet = upstream.seen.find((entry) => entry.method === "GET" && entry.url?.startsWith("/api/v1/managed/events"));
+  assert.equal(new URL(eventGet.url, "http://127.0.0.1").search, "?after=7&wait_ms=42&limit=100");
 
   const metadata = { threadId, "x-codex-turn-metadata": { thread_id: threadId } };
   const missingArgs = await request(5, "tools/call", { name: "orchestration_pause", _meta: metadata, arguments: { request_id: "missing-args" } });

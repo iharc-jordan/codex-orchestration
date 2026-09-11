@@ -455,6 +455,33 @@ function safeMessage(status, body, token) {
   }
   return `Symphony request failed with HTTP ${status}`;
 }
+var MANAGED_STATE_VIEWS = /* @__PURE__ */ new Set(["summary", "detail", "full"]);
+function stateQuery(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new BridgeError("state_args_invalid", "state arguments must be an object");
+  }
+  if (args.view !== void 0 && (typeof args.view !== "string" || !MANAGED_STATE_VIEWS.has(args.view))) {
+    throw new BridgeError("state_view_invalid", "view must be summary, detail, or full");
+  }
+  for (const [name, value] of [["project_id", args.project_id], ["assignment_id", args.assignment_id]]) {
+    if (value !== void 0 && (typeof value !== "string" || value.trim() === "")) {
+      throw new BridgeError("state_filter_invalid", `${name} must be a non-empty string`);
+    }
+  }
+  if (args.include_history !== void 0 && typeof args.include_history !== "boolean") {
+    throw new BridgeError("state_history_invalid", "include_history must be a boolean");
+  }
+  if (args.view === "detail" && args.assignment_id === void 0) {
+    throw new BridgeError("state_assignment_required", "detail state requires assignment_id");
+  }
+  const query = new URLSearchParams();
+  if (args.view !== void 0) query.set("view", args.view);
+  if (args.project_id !== void 0) query.set("project_id", args.project_id);
+  if (args.assignment_id !== void 0) query.set("assignment_id", args.assignment_id);
+  if (args.include_history !== void 0) query.set("include_history", String(args.include_history));
+  const encoded = query.toString();
+  return encoded ? `?${encoded}` : "";
+}
 var ManagedClient = class _ManagedClient {
   constructor(config, operatorToken, trustedThreadId) {
     this.config = config;
@@ -468,8 +495,9 @@ var ManagedClient = class _ManagedClient {
     const config = await loadConfig();
     return new _ManagedClient(config, await readToken(config), trustedThreadId);
   }
-  async state() {
-    return this.request("/api/v1/managed/state", { method: "GET" });
+  async state(args = {}) {
+    const query = stateQuery(args);
+    return this.request(`/api/v1/managed/state${query}`, { method: "GET" });
   }
   async events(after, waitMs, limit) {
     if (!Number.isInteger(after) || after < 0) throw new BridgeError("events_after_invalid", "after must be a non-negative integer");

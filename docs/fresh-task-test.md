@@ -24,6 +24,15 @@ logs only; do not add a benchmark framework. A single smoke or comparison is a
 maintenance signal, not proof of long-term maintenance value. This comparison is
 separate from accepting and delivering the assigned job.
 
+Use the managed state summary for routine observations. When a review or waiting
+boundary needs one assignment's evidence, request the scoped detail view; use the
+full view only for an explicit diagnostic. If a sourced finding from another
+assignment affects the next turn, the PM may attach its existing assignment,
+attempt, and report IDs as bounded `peer_report_refs` review feedback. The runtime
+resolves those records for the recipient; they remain evidence and do not alter
+the job scope or ownership. Record any missing or stale reference as a normal
+rework reason instead of copying report text into the task.
+
 Prompt guidance: [OpenAI prompt engineering](https://developers.openai.com/api/docs/guides/prompt-engineering)
 and [Astra instruction-following guidance for the PM](https://developers.openai.com/api/docs/guides/latest-model#instruction-following).
 Use clear roles, separate assignment instructions from reference data, and avoid

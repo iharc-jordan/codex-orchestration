@@ -1,14 +1,19 @@
 # Managed API contract
 
 This directory defines the loopback contract shared by the TypeScript bridge
-and the Symphony service tests. The public release pairing is plugin `v0.1.0`
-with Symphony runtime `v0.1.6`. The contract and fixture in the current
-checkout describe the unreleased `v0.2.0` managed-control candidate; they are
-not a public release receipt or production proof.
+and the Symphony service tests. The public release pairing recorded by the
+historical baseline is plugin `v0.1.0` with Symphony runtime `v0.1.6`. The
+current checkout describes the unreleased `v0.2.0` plugin with local runtime
+candidate `0.2.0-mvp.3`; it is not a public release receipt or production proof.
 
 The service exposes `GET /api/v1/managed/state`,
 `GET /api/v1/managed/events?after=N&wait_ms=M&limit=L`, and
-`POST /api/v1/managed/control`. Control bodies always contain `request_id`,
+`POST /api/v1/managed/control`. State reads return a compact summary by default;
+`view=detail` requires an assignment ID, while `view=full` is an explicit
+diagnostic. Optional project/assignment filters and `include_history` are
+serialized as query parameters; detail includes the selected assignment's full
+reports, while `include_history` requests historical assignment records.
+Control bodies always contain `request_id`,
 `operation`, and an operation-specific `args` object. `wait_ms` is at most
 60000 and `limit` is at most 100. The bridge preserves caller-owned request and
 revision fields, does not invent or replay write requests, and returns
@@ -46,13 +51,20 @@ calculate a manual hash. If a caller supplies identity or fingerprint metadata,
 the service verifies it against the provider. Route escalation requires
 `escalation_reason` whenever the route is above Luna/xhigh.
 
-The checked fixture records request and response examples for the state,
-events, binding, PM controls, enrollment, revision, pause/resume,
+The checked fixture records request and response examples for the default state,
+scoped state views, events, binding, PM controls, enrollment, revision, pause/resume,
 interruption, cancellation, review, handoff, route validation, and errors. The
 same fixture is mirrored at
 `elixir/test/fixtures/managed_control_fixture.json` in the pinned Symphony
 source, and its Elixir contract test applies the examples to the service rules.
 Release validation compares the two copies.
+
+Review feedback can carry up to eight unique `peer_report_refs` entries, each
+containing `source_assignment_id`, `source_attempt_id`, and `report_id`. The
+runtime resolves these references from canonical assignment reports only at a
+normal rework or waiting boundary, validates project/attempt/revision scope, and
+supplies bounded findings to the recipient's next turn. References remain
+evidence and cannot grant authority or expand scope.
 
 On Windows, the launcher runs the bundle in the configured Ubuntu WSL
 environment and resolves `node` from the login environment. If that environment

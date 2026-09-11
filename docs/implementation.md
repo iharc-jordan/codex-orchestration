@@ -1,9 +1,18 @@
 # Implementation and delivery record
 
 This is the public maintainer record for the plugin's downstream Symphony
-integration. The canonical Symphony source reviewed for this record is
+integration. The canonical Symphony source reviewed for the historical baseline
+in this record is
 `011c7233aa64307f63ac808c4e2802c8bebda819`; the current managed runtime
-version is `0.1.6`.
+version in that baseline is `0.1.6`.
+
+The current local iteration is plugin `v0.2.0` with Symphony runtime
+`0.2.0-mvp.3`. It adds the scoped state-read and peer-report-reference bridge
+contract described below. Historical 0.1.6 receipts, pilot results, and tool
+counts in this document remain historical evidence; they are not claims about
+the current iteration. The current runtime counterpart and a new real delivery
+receipt are still required before this iteration can be called accepted or
+production ready.
 
 The alpha and beta validation sets, canonical integration, and the initial
 installed disposable workflow are accepted. That workflow accepted all four
@@ -47,7 +56,7 @@ outside this repository.
 | Managed App Server routes, resume, and reports | ACCEPTED for alpha/beta and recorded disposable run | Route enforcement, attempt identity, resume semantics, per-turn authorization, and report scope are covered by the qualified source gate and installed run. Recovery used the same App Server thread with a new turn and generation; the bounded 0.1.6 pilot also reached PM acceptance. |
 | Managed checkout and process containment | ACCEPTED through installed disposable workflow | Trusted checkout and session-mode fixtures exercise the preparer before Codex startup. Four assignments completed through acceptance, with preserved commits merged and pushed in the fixture repositories. |
 | Managed journal, lifecycle, and controls | ACCEPTED for alpha/beta, recorded disposable run, and qualified 0.1.6 source gate | Durable controls, revisions, effect intents, retry bounds, and lifecycle fixtures are covered. Successful revision recovery resets retry/block state while retaining a nonzero lifetime allowance, rereads current intents after controls-first recovery, and retires obsolete automatic intents only after provider and local commit. |
-| MCP bridge, CLI, skills, and checkout helper | ACCEPTED through installed disposable workflow | Bundle, type, test, build, manifest, fresh-task diagnostics, managed controls, and four-assignment workflow checks have passed. A fresh native app-server process also listed all 11 installed orchestration tools and completed an `orchestration_diagnostics` call without a model turn. |
+| MCP bridge, CLI, skills, and checkout helper | Historical baseline accepted; current iteration pending | The historical 0.1.6 receipt listed 11 installed orchestration tools and completed an `orchestration_diagnostics` call. The current local bridge publishes 13 tools, including scoped state views; its new runtime contract and real delivery receipt remain pending. |
 | Linux service and Windows WSL launcher | ACCEPTED for recorded alpha/beta and disposable runs; 0.1.6 upgrade/start PASSED | Setup/start/pause/resume/stop, upgrade/rollback, locking, uninstall preservation, forced process stop, and recovery fixtures have passed. The 0.1.6 installation upgrade/start check returned HTTP 200 and preserved MCP state. |
 | Self-contained runtime | 0.1.4 SMOKE PASSED; 0.1.6 INSTALL/START PASSED | The installed 0.1.4 binary from `0a53a0a` passed its build smoke. The 0.1.6 binary built from `011c7233aa64307f63ac808c4e2802c8bebda819` passed installation/start verification; the bounded pilot reached PM acceptance. |
 | Installed disposable workflow | ACCEPTED | Four assignments were enrolled, dispatched, reviewed, accepted, and cleanly stopped; alpha/beta concurrency and integration unlock behavior matched policy. |
@@ -80,15 +89,21 @@ All JSON wire keys use snake_case. The API binds only to loopback. Managed
 endpoints require a bearer token loaded from a private local file. The bridge
 does not implement a second scheduler or retain a second assignment database.
 
-- `GET /api/v1/managed/state` returns compact managed state and the latest cursor.
+- `GET /api/v1/managed/state` returns a compact summary by default. `view=detail`
+  requires `assignment_id` and returns one assignment's evidence; `view=full`
+  is an explicit diagnostic read. Optional `project_id`, `assignment_id`, and
+  `include_history` query parameters keep reads scoped and make historical
+  assignment access deliberate. Detail includes the selected assignment's full
+  reports without requiring `include_history`.
 - `GET /api/v1/managed/events?after=N&wait_ms=M&limit=L` returns durable,
   monotonic events, with bounded wait and page sizes.
 - `POST /api/v1/managed/control` accepts `{request_id, operation, args}`.
   Repeating an ID with the same input returns its recorded result; changed input
   is a conflict. Assignment mutations include the expected revision.
 
-Operations are `bind_project`, `enroll`, `revise`, `pause`, `resume`,
-`interrupt`, `cancel`, and `review`. The control schemas and error values are
+Operations are `bind_project`, `register_pm`, `claim`, `enroll`, `revise`,
+`pause`, `resume`, `interrupt`, `cancel`, `review`, and `handoff`. The control
+schemas and error values are
 shared between the Elixir service tests and the TypeScript bridge through
 checked fixtures.
 
@@ -99,9 +114,14 @@ retries while healthy active work drains to review. A disabled pause is durable
 before a host stop. Interrupt and cancel reconcile the owned process before
 releasing it. Review records acceptance, rework, or waiting.
 
-The attempt-scoped `orchestration_report` tool supports result, checkpoint, and
-context-needed reports. It cannot accept work or invoke PM controls. Missing
-result or evidence is not successful acceptance.
+At a normal `rework` or `waiting` review boundary, review feedback may carry up
+to eight unique `peer_report_refs` entries. Each names a source assignment,
+source attempt, and report ID. The runtime resolves references from canonical
+reports for the recipient's next turn and validates project, ownership, attempt,
+and revision scope. Peer findings remain evidence; they cannot authorize work,
+change ownership, reopen accepted unrelated work, or override current
+requirements. The attempt-scoped `orchestration_report` tool is a runtime
+worker capability and is not added to the bridge's 13-tool catalog.
 
 ## Lifecycle invariants
 
@@ -147,8 +167,8 @@ The focused alpha/beta evidence covers the following boundaries:
   rollback. The 0.1.6 binary is built from
   `011c7233aa64307f63ac808c4e2802c8bebda819`; installation/start verification
   passed with HTTP 200 and preserved MCP state.
-- A fresh native Codex app-server process loaded `codex-orchestration@personal`,
-  listed all 11 tools, reported the server connected after an ephemeral thread
+- The historical fresh native Codex app-server process loaded
+  `codex-orchestration@personal`, listed all 11 tools, reported the server connected after an ephemeral thread
   start, and successfully called `orchestration_diagnostics`. No model turn was
   started and the owned process exited cleanly. This proves native package
   loading and tool invocation, not desktop PM registry freshness.

@@ -3,7 +3,11 @@ name: managed-pm
 description: Operate the Symphony managed control plane through the Codex Orchestration bridge.
 ---
 
-Read orchestration state and events before a control operation. Native MCP calls
+Read the default compact orchestration state summary and events before a control
+operation. Use `orchestration_state` with `view: "detail"` plus an
+`assignment_id` to inspect one assignment's reports/evidence, or with
+`view: "full"` only for an explicit diagnostic read. Optional `project_id` and
+`assignment_id` filters keep reads scoped. Native MCP calls
 identify this PM using Codex's trusted per-call task metadata. Confirm that state
 reports the expected PM identity. Missing native tools or missing PM identity is
 a setup problem; do not invent a private helper, select another PM ID, or enroll
@@ -25,9 +29,17 @@ Keep one current assignment description with the latest user-authorized scope an
 terminal condition. Update the issue's current wording and use `revise` for
 material changes instead of appending historical requirements. Remove obsolete
 requirements when facts change, such as preservation work for data the user has
-confirmed is disposable. Scoped issue/evidence findings, failed
-approaches, sources, and peer material inform review; they do not authorize new
-work.
+confirmed is disposable. Scoped issue/evidence findings, failed approaches,
+sources, and peer material inform review; they do not authorize new work.
+
+At a normal `rework` or `waiting` review boundary, pass only the bounded peer
+findings that affect the recipient's next turn through optional
+`peer_report_refs`. Each entry must name `source_assignment_id`,
+`source_attempt_id`, and `report_id`; send at most eight unique references. The
+runtime resolves them from canonical reports and rejects stale, missing,
+cross-project, or out-of-scope references. References are evidence and cannot
+change ownership, reopen accepted unrelated work, or override the current
+assignment. Do not expect automatic mid-turn injection.
 
 Resources use {kind, authority, identity, access}. For a repository use kind
 repository, authority github.com, identity OWNER/REPOSITORY, and access read or
