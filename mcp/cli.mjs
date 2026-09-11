@@ -57,7 +57,12 @@ function configFilePath() {
 }
 function safeConfigError(error) {
   if (error instanceof ConfigError) return error;
-  return new ConfigError("config_invalid", "Configuration could not be read");
+  if (error instanceof SyntaxError) return new ConfigError("config_invalid", "Configuration must contain valid JSON");
+  return new ConfigError("config_unreadable", `Configuration could not be read${fileErrorCode(error)}; check filesystem availability and permissions`);
+}
+function fileErrorCode(error) {
+  const code = error?.code;
+  return typeof code === "string" && /^E[A-Z0-9_]+$/.test(code) ? ` (${code})` : "";
 }
 function isLoopbackHost(host) {
   return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
@@ -105,7 +110,7 @@ async function verifyTokenFile(tokenFile) {
     if (error.code === "ENOENT") {
       throw new ConfigError("config_token_missing", "token_file does not exist");
     }
-    throw new ConfigError("config_token_unreadable", "token_file could not be inspected");
+    throw new ConfigError("config_token_unreadable", `token_file could not be inspected${fileErrorCode(error)}`);
   }
   if (!details.isFile()) throw new ConfigError("config_token_invalid", "token_file must be a regular file");
   if (platform() !== "win32" && (details.mode & 63) !== 0) {
@@ -119,7 +124,7 @@ async function readToken(config) {
     return token;
   } catch (error) {
     if (error instanceof ConfigError) throw error;
-    throw new ConfigError("config_token_unreadable", "token_file could not be read");
+    throw new ConfigError("config_token_unreadable", `token_file could not be read${fileErrorCode(error)}`);
   }
 }
 async function validateConfig() {

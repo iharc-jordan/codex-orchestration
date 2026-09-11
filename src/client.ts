@@ -135,6 +135,7 @@ export interface EnrollArgs extends RevisionArgs {
   escalation_reason?: string;
   requirements_fingerprint?: string;
   requirements_revision: number;
+  turn_limit?: number;
 }
 
 export interface ReviseArgs extends RevisionArgs {
@@ -143,6 +144,11 @@ export interface ReviseArgs extends RevisionArgs {
   expected_ownership_revision: number;
   requirements_fingerprint?: string;
   requirements_revision?: number;
+  changes?: {
+    turn_limit?: number;
+    turn_limit_reason?: string;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 

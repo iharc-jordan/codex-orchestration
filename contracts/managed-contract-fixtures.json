@@ -10,6 +10,9 @@
     {"route":{"model":"gpt-5.6-luna","effort":"xhigh"},"accepted":true},
     {"route":{"model":"gpt-5.6-terra","effort":"max"},"escalation_reason":"Fixture requires additional reasoning depth","accepted":true},
     {"route":{"model":"gpt-5.6-terra","effort":"max"},"accepted":false},
+    {"route":{"model":"gpt-5.6-sol","effort":"xhigh"},"escalation_reason":"Fixture spans native integration boundaries","accepted":true},
+    {"route":{"model":"gpt-5.6-sol","effort":"max"},"escalation_reason":"Fixture requires exceptional connected reasoning","accepted":true},
+    {"route":{"model":"gpt-5.6-sol","effort":"xhigh"},"accepted":false},
     {"route":{"model":"gpt-6-astra","effort":"xhigh"},"escalation_reason":"Not an allowed worker route","accepted":false}
   ],
   "http": {

@@ -217,7 +217,11 @@ test("bundled stdio bridge performs authenticated state, events, and controls", 
   assert.equal(peerReportRefs.uniqueItems, true);
   assert.deepEqual(peerReportRefs.items.required, ["source_assignment_id", "source_attempt_id", "report_id"]);
   assert.equal(peerReportRefs.items.additionalProperties, false);
-  assert.deepEqual(listedTools.get("orchestration_enroll").inputSchema.properties.args.properties.route.properties.model.enum, ["gpt-5.6-luna", "gpt-5.6-terra"]);
+  assert.deepEqual(listedTools.get("orchestration_enroll").inputSchema.properties.args.properties.route.properties.model.enum, ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]);
+  assert.equal(listedTools.get("orchestration_enroll").inputSchema.properties.args.properties.turn_limit.maximum, 20);
+  assert.equal(listedTools.get("orchestration_revise").inputSchema.properties.args.properties.changes.properties.turn_limit.maximum, 100);
+  assert.equal(listedTools.get("orchestration_revise").inputSchema.properties.args.properties.changes.properties.turn_limit_reason.minLength, 1);
+  assert.match(listedTools.get("orchestration_review").inputSchema.properties.args.properties.evidence.description, /context_needed/);
   const enrollSchema = listedTools.get("orchestration_enroll").inputSchema.properties.args.properties;
   assert.equal(enrollSchema.escalation_reason.type, "string");
   assert.equal(enrollSchema.route.properties.reason, undefined);

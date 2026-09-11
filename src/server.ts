@@ -45,7 +45,7 @@ const resourcesProperty = {
 const routeProperty = {
   type: "object",
   properties: {
-    model: { type: "string", enum: ["gpt-5.6-luna", "gpt-5.6-terra"] },
+    model: { type: "string", enum: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"] },
     effort: { type: "string", enum: ["xhigh", "max"] }
   },
   required: ["model", "effort"],
@@ -128,7 +128,8 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
       route: routeProperty,
       escalation_reason: escalationReasonProperty,
       requirements_fingerprint: requirementsFingerprintProperty,
-      requirements_revision: requirementsRevisionProperty
+      requirements_revision: requirementsRevisionProperty,
+      turn_limit: { type: "integer", minimum: 1, maximum: 20, description: "Initial lifetime turn allowance; defaults to 20. Retries share this count." }
     },
     required: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_revision"],
     additionalProperties: true
@@ -150,7 +151,9 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
           dependencies: { type: "array", items: { type: "string" } },
           requirements: { type: "object" },
           requirements_fingerprint: { type: "string", minLength: 1, description: "Required when the issue body changes: sha256: plus the SHA-256 digest of its exact UTF-8 body. Omission preserves the enrolled fingerprint; only enrollment resolves it automatically." },
-          requirements_revision: requirementsRevisionProperty
+          requirements_revision: requirementsRevisionProperty,
+          turn_limit: { type: "integer", minimum: 1, maximum: 100, description: "Explicit increase to the absolute lifetime turn allowance. Must exceed the current limit; preserves turns already reserved. Requires turn_limit_reason." },
+          turn_limit_reason: { type: "string", minLength: 1, description: "Required justification for increasing the lifetime turn allowance." }
         },
         additionalProperties: false
       }
@@ -200,7 +203,7 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
       project_id: projectIdProperty,
       assignment_id: assignmentIdProperty,
       disposition: { type: "string", enum: ["accepted", "rework", "waiting", "blocked"] },
-      evidence: { type: "array", items: { type: "string", minLength: 1 } },
+      evidence: { type: "array", items: { type: "string", minLength: 1 }, description: "Acceptance proof for the current revision. Required for accepted review, including inactive, reconciled context_needed assignments in WAITING." },
       peer_report_refs: peerReportRefsProperty,
       reason: { type: "string" }
     },

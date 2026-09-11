@@ -5,8 +5,10 @@ existing Symphony Orchestrator. GitHub Projects and repository issues own work;
 the operational journal owns execution recovery only.
 
 - User authority and current assignment revisions govern execution.
-- Root acts as PM. Delegate bounded implementation to the 5.6 family, default
-  Luna/xhigh; preserve active worker routes. No worker recursively delegates.
+- Sol/xhigh is the delivery PM for substantial orchestration; Astra owns scope
+  decisions and exceptional escalations. Workers default to Luna/xhigh, with
+  Terra or Sol xhigh/max for justified complexity. Preserve active routes.
+  The delivery PM delegates; implementation workers do not recursively delegate.
 - Keep upstream Projects and hook-context changes independent of managed policy.
 - Runtime and workers execute in Linux; Windows hosts the plugin launcher/PM.
 - Do not install duplicate global Codex/GitHub CLIs or alter other projects.

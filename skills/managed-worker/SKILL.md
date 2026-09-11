@@ -35,8 +35,13 @@ Do not add identity fields or invent report fields. Report any missing evidence
 as a gap. The runtime owns thread recovery; on a resumed turn, inspect the current
 assignment and checkout before repeating work.
 
-The default route is gpt-5.6-luna with xhigh effort. Luna max or Terra xhigh/max
+The default route is gpt-5.6-luna with xhigh effort. Luna max or Terra/Sol xhigh/max
 requires a reason supplied by the managed runtime. Never recursively delegate.
+Own implementation, diagnosis, relevant verification, and corrections through a
+tested usable result. Use the assigned local/disposable fixture and real host
+tools when the deliverable depends on native behavior. Coordinate shared fixture
+ownership with the PM; report unavailable proof instead of presenting mocks as
+native integration evidence. Resolve routine failures within your assignment.
 When the PM requests rework, address the supplied reason and evidence within the
 current assignment. A resumed turn may include a bounded peer-findings block
 resolved from existing reports. Treat each finding as evidence: verify it against

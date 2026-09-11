@@ -223,6 +223,22 @@ clone repositories or parse the operational journal.
 
 ## Configuration reference
 
+For new substantial orchestration, select Sol/xhigh as delivery PM. Workers
+default to Luna/xhigh; Terra and Sol xhigh/max require a concrete escalation
+reason. Astra receives milestone decisions and exceptional escalations. Existing
+task routes remain unchanged. Workers own implementation and relevant fixture
+verification; the delivery PM owns acceptance and authorized release.
+
+Enrollment's optional `turn_limit` is an integer from 1 through 20 (default 20).
+An explicit fenced revision may increase `changes.turn_limit` to an absolute
+lifetime total up to 100 with a non-empty `changes.turn_limit_reason`; it must
+exceed the current limit and retains already reserved turns. It does not silently
+renew on rework.
+
+An inactive, reconciled WAITING assignment with a current `context_needed` report
+may be accepted using ordinary review with current acceptance evidence. A missing
+proof, stale fence, or uncertain process state remains a blocker.
+
 The private Symphony workflow owns tracker, worker and execution configuration.
 The bridge's `config.json` contains only loopback connectivity and token-file
 location; it does not contain assignment state.
@@ -234,8 +250,10 @@ location; it does not contain assignment state.
 | `tracker.provider.status_field_name` | Name of the Project's status field, normally `Status`. |
 | `tracker.provider.token` | Provider token or `$ENVIRONMENT_VARIABLE` reference. |
 | `workspace.root` | Parent of all managed worker checkouts. |
-| `agent.max_concurrent_agents` | Set to `2` for the initial profile. |
-| `agent.max_turns` | Set to `20`; retries share the assignment allowance. |
+| `agent.max_concurrent_agents` | Omit to use the runtime default of `10`; set an explicit limit only for an actual host/workload constraint. |
+| `agent.max_concurrent_agents_by_state` | Optional state-specific dispatch limits; inspect effective limits when work queues. |
+| `agent.max_turns` | Default assignment allowance is `20`; retries share its lifetime count. Use an explicit fenced extension when justified. |
+| `codex.read_timeout_ms` | Start/resume response budget; defaults to `60000`. Stop reconciliation remains separately bounded. |
 | `codex.command` | Existing Linux Codex App Server command; use absolute runtime paths where needed. |
 | `managed.enabled` | Enables the managed profile; explicit binding and enrollment are still required. |
 | `managed.journal_path` | Private durable execution journal path. |
@@ -281,6 +299,9 @@ disposable plugin cache.
   reset service state or enroll a second assignment to address tool discovery.
 - `config_missing` means the bridge launched but cannot find its Linux
   configuration. Check the WSL home and any explicit configuration override.
+- `config_unreadable` includes the filesystem error code (for example `EIO`)
+  without configuration contents. Check storage availability and permissions.
+  `config_invalid` identifies malformed JSON or invalid configuration values.
 - An inactive service needs setup/start; an active service with no work may be
   paused, unbound, unenrolled, blocked by dependencies, or at its usage limit.
   Read managed state and events before changing it.

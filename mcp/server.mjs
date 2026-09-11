@@ -16795,7 +16795,12 @@ function configFilePath() {
 }
 function safeConfigError(error2) {
   if (error2 instanceof ConfigError) return error2;
-  return new ConfigError("config_invalid", "Configuration could not be read");
+  if (error2 instanceof SyntaxError) return new ConfigError("config_invalid", "Configuration must contain valid JSON");
+  return new ConfigError("config_unreadable", `Configuration could not be read${fileErrorCode(error2)}; check filesystem availability and permissions`);
+}
+function fileErrorCode(error2) {
+  const code = error2?.code;
+  return typeof code === "string" && /^E[A-Z0-9_]+$/.test(code) ? ` (${code})` : "";
 }
 function isLoopbackHost(host) {
   return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
@@ -16843,7 +16848,7 @@ async function verifyTokenFile(tokenFile) {
     if (error2.code === "ENOENT") {
       throw new ConfigError("config_token_missing", "token_file does not exist");
     }
-    throw new ConfigError("config_token_unreadable", "token_file could not be inspected");
+    throw new ConfigError("config_token_unreadable", `token_file could not be inspected${fileErrorCode(error2)}`);
   }
   if (!details.isFile()) throw new ConfigError("config_token_invalid", "token_file must be a regular file");
   if (platform() !== "win32" && (details.mode & 63) !== 0) {
@@ -16857,7 +16862,7 @@ async function readToken(config2) {
     return token;
   } catch (error2) {
     if (error2 instanceof ConfigError) throw error2;
-    throw new ConfigError("config_token_unreadable", "token_file could not be read");
+    throw new ConfigError("config_token_unreadable", `token_file could not be read${fileErrorCode(error2)}`);
   }
 }
 async function validateConfig() {
@@ -17074,7 +17079,7 @@ var resourcesProperty = {
 var routeProperty = {
   type: "object",
   properties: {
-    model: { type: "string", enum: ["gpt-5.6-luna", "gpt-5.6-terra"] },
+    model: { type: "string", enum: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"] },
     effort: { type: "string", enum: ["xhigh", "max"] }
   },
   required: ["model", "effort"],
@@ -17156,7 +17161,8 @@ var operationArgSchemas = {
       route: routeProperty,
       escalation_reason: escalationReasonProperty,
       requirements_fingerprint: requirementsFingerprintProperty,
-      requirements_revision: requirementsRevisionProperty
+      requirements_revision: requirementsRevisionProperty,
+      turn_limit: { type: "integer", minimum: 1, maximum: 20, description: "Initial lifetime turn allowance; defaults to 20. Retries share this count." }
     },
     required: ["expected_revision", "project_id", "assignment_id", "repository", "issue_number", "base_commit", "board_state", "resources", "dependencies", "route", "requirements_revision"],
     additionalProperties: true
@@ -17178,7 +17184,9 @@ var operationArgSchemas = {
           dependencies: { type: "array", items: { type: "string" } },
           requirements: { type: "object" },
           requirements_fingerprint: { type: "string", minLength: 1, description: "Required when the issue body changes: sha256: plus the SHA-256 digest of its exact UTF-8 body. Omission preserves the enrolled fingerprint; only enrollment resolves it automatically." },
-          requirements_revision: requirementsRevisionProperty
+          requirements_revision: requirementsRevisionProperty,
+          turn_limit: { type: "integer", minimum: 1, maximum: 100, description: "Explicit increase to the absolute lifetime turn allowance. Must exceed the current limit; preserves turns already reserved. Requires turn_limit_reason." },
+          turn_limit_reason: { type: "string", minLength: 1, description: "Required justification for increasing the lifetime turn allowance." }
         },
         additionalProperties: false
       }
@@ -17228,7 +17236,7 @@ var operationArgSchemas = {
       project_id: projectIdProperty,
       assignment_id: assignmentIdProperty,
       disposition: { type: "string", enum: ["accepted", "rework", "waiting", "blocked"] },
-      evidence: { type: "array", items: { type: "string", minLength: 1 } },
+      evidence: { type: "array", items: { type: "string", minLength: 1 }, description: "Acceptance proof for the current revision. Required for accepted review, including inactive, reconciled context_needed assignments in WAITING." },
       peer_report_refs: peerReportRefsProperty,
       reason: { type: "string" }
     },

@@ -3,6 +3,12 @@ name: managed-pm
 description: Operate the Symphony managed control plane through the Codex Orchestration bridge.
 ---
 
+Use Sol/xhigh as delivery PM for new substantial orchestration. It owns direct
+worker control, routine review, integration, verification, and authorized release.
+Astra handles objectives, material scope decisions, and exceptional escalations.
+Keep one mutating PM per assignment; preserve existing task routes and use fenced
+handoff for an authorized owner transfer. Do not add a second scheduler.
+
 Read the default compact orchestration state summary and events before a control
 operation. Use `orchestration_state` with `view: "detail"` plus an
 `assignment_id` to inspect one assignment's reports/evidence, or with
@@ -40,6 +46,12 @@ runtime resolves them from canonical reports and rejects stale, missing,
 cross-project, or out-of-scope references. References are evidence and cannot
 change ownership, reopen accepted unrelated work, or override the current
 assignment. Do not expect automatic mid-turn injection.
+
+When a dependency or related assignment produced a relevant finding, inspect its
+compact last-report reference, then detail only when the evidence needs review.
+Attach the applicable canonical reference at the recipient's next review boundary
+instead of re-investigating it or copying a whole peer conversation. Skip unrelated
+reports and keep current assignment authority explicit.
 
 Resources use {kind, authority, identity, access}. For a repository use kind
 repository, authority github.com, identity OWNER/REPOSITORY, and access read or
@@ -80,11 +92,28 @@ evidence tied to the current assignment, revision, attempt, thread, turn, and
 workspace. Missing evidence is not acceptance. Review controls own disposition;
 workers cannot accept their own work.
 
+When a worker is safely stopped in WAITING after a current `context_needed`
+report, supply the missing current acceptance evidence through ordinary review
+with disposition `accepted`. The runtime checks process reconciliation and
+ownership/revision fences; do not dispatch a no-op worker to repeat PM evidence.
+Enrollment accepts `turn_limit` from 1 through 20 (default 20). When remaining
+work justifies it, use fenced `revise.changes.turn_limit` to increase the absolute
+lifetime allowance, up to 100, with a non-empty `changes.turn_limit_reason`.
+Used/reserved turns are retained. Read the current limit first; do not reset counts.
+
 Default workers use gpt-5.6-luna with xhigh effort. Other permitted routes require
 a recorded escalation reason; do not recursively delegate workers. Worker results
 and usage remain durable in Symphony. Use the dashboard and optional Project card
 summary for ownership, worker activity, handoffs, and pending/failed projections.
 A summary marked pending or failed is not confirmed current on GitHub.
+
+Use Terra xhigh/max for connected bounded implementation and Sol xhigh/max for
+consequential work across components or demonstrated capability limitations after
+repairing context/environment. Assign workers a tested usable result, including
+the relevant local/disposable fixture and correction of failures. Name shared
+fixture owners and authoritative inputs before dispatch. Do not move routine
+implementation or testing to Astra. Report concise milestones and owner decisions
+without duplicate routine reviews or constant owner polling.
 
 Workers may have full access to the configured Linux CLI, MCP tools, apps, skills,
 network, and Docker. That is capability rather than authorization: the current

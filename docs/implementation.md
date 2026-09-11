@@ -29,8 +29,9 @@ recorded in the versioned GitHub release notes.
 
 ## Fixed architecture
 
-Symphony remains the only scheduler. The initial profile uses one Linux
-execution host, one managed GitHub Project, and two concurrent workers. The
+Symphony remains the only scheduler. The profile uses one Linux execution host
+and explicit managed GitHub Project bindings. Worker concurrency defaults to ten
+unless the workflow deliberately supplies a host/workload or per-state limit. The
 Codex desktop PM calls the bundled stdio MCP bridge; the bridge calls the
 authenticated loopback Symphony API; Symphony owns assignment state and starts
 Codex App Server workers.
@@ -139,9 +140,11 @@ without resetting it.
 The managed profile keeps the saved Codex thread. After a confirmed process
 stop, recovery resumes that thread with a new turn and current facts; it does
 not replay an interrupted turn or silently start a fresh thread. The default
-route is Luna/xhigh. Luna/max and Terra/xhigh or Terra/max require an explicit
-reason. Two automatic transient retries are allowed, and the 20-turn assignment
-allowance is shared across retries.
+route is Luna/xhigh. Luna/max and Terra or Sol xhigh/max require an explicit
+reason. Sol/xhigh is the default delivery PM for new substantial orchestration;
+Astra receives scope decisions and exceptional escalations. Two automatic
+transient retries are allowed, and the default 20-turn assignment allowance is
+shared across retries; a bounded fenced extension preserves the lifetime count.
 
 ## Delivery evidence
 
