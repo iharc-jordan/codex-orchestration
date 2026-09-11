@@ -229,6 +229,12 @@ reason. Astra receives milestone decisions and exceptional escalations. Existing
 task routes remain unchanged. Workers own implementation and relevant fixture
 verification; the delivery PM owns acceptance and authorized release.
 
+The managed delivery PM must be a normal Codex task with the native orchestration
+tools loaded. On the currently verified desktop build, an internal Sol subagent
+does not inherit these tools, although it can coordinate native subagents.
+Confirm a native state summary identifies the intended PM before control work.
+Do not use private scripts or another PM's identity to bypass missing tools.
+
 Enrollment's optional `turn_limit` is an integer from 1 through 20 (default 20).
 An explicit fenced revision may increase `changes.turn_limit` to an absolute
 lifetime total up to 100 with a non-empty `changes.turn_limit_reason`; it must

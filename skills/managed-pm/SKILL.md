@@ -9,6 +9,12 @@ Astra handles objectives, material scope decisions, and exceptional escalations.
 Keep one mutating PM per assignment; preserve existing task routes and use fenced
 handoff for an authorized owner transfer. Do not add a second scheduler.
 
+Run the Sol delivery PM in a normal Codex task that exposes the native managed
+tools. Verify this in that PM's own context before assigning managed delivery:
+the current desktop build does not expose these tools to internal subagents.
+An internal lead may coordinate native subagents, but that does not prove managed
+PM connectivity. Separate-task creation requires explicit user authorization.
+
 Read the default compact orchestration state summary and events before a control
 operation. Use `orchestration_state` with `view: "detail"` plus an
 `assignment_id` to inspect one assignment's reports/evidence, or with
