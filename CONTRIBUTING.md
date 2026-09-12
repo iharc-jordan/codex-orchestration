@@ -1,8 +1,8 @@
 # Contributing
 
-Keep the existing Symphony Orchestrator as the only scheduler. GitHub Projects and repository issues own work; the local journal owns execution recovery. Prefer a small addition to the existing control, tracker or session boundary over a second scheduler, task database or compatibility layer.
+Keep the existing Symphony Orchestrator as the only scheduler. GitHub Projects and repository issues own work; the runtime's private SQLite state records execution recovery. Prefer a small addition to the existing control, tracker or session boundary over a second scheduler, task database or compatibility layer.
 
-Read [AGENTS.md](AGENTS.md) for ownership and validation rules, [the delivery contract](docs/implementation.md) for current interfaces, and [data handling](docs/data-handling.md) before preparing fixtures or logs.
+Read [AGENTS.md](AGENTS.md) for ownership and validation rules and [the Windows lifecycle contract](docs/windows.md) before preparing fixtures or logs.
 
 For plugin changes, use the locked dependencies and run the checks relevant to the changed behavior:
 

@@ -37,5 +37,5 @@ unknown, stop cleanup and retain the affected workspace for reconciliation;
 manual deletion must not bypass the application's cleanup order. Keep any
 provider-specific repair with the project owner.
 
-These templates cover the dependency workflow. The separate lifecycle cases in
-[the validation matrix](../docs/validation.md) are also required before release.
+These templates cover the dependency workflow. Review the native Windows
+[lifecycle contract](../docs/windows.md) before release.

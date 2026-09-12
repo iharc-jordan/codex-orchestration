@@ -331,14 +331,14 @@ export class ManagedClient {
       : operatorToken;
   }
 
-  static async fromConfig(trustedThreadId?: string): Promise<ManagedClient> {
-    const config = await loadConfig();
+  static async fromConfig(trustedThreadId?: string, testRoot?: string): Promise<ManagedClient> {
+    const config = await loadConfig(testRoot);
     return new ManagedClient(config, await readToken(config), trustedThreadId);
   }
 
-  async state(args: ManagedStateArgs = {}): Promise<ManagedState> {
+  async state(args: ManagedStateArgs = {}, timeoutMs = 60_000): Promise<ManagedState> {
     const query = stateQuery(args);
-    return this.request(`/api/v1/managed/state${query}`, { method: "GET" }) as Promise<ManagedState>;
+    return this.request(`/api/v1/managed/state${query}`, { method: "GET" }, false, timeoutMs) as Promise<ManagedState>;
   }
 
   async events(after: number, waitMs: number, limit: number): Promise<ManagedEvents> {
@@ -362,10 +362,10 @@ export class ManagedClient {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request)
-    }) as Promise<ControlResponse<O>>;
+    }, true) as Promise<ControlResponse<O>>;
   }
 
-  private async request(path: string, init: RequestInit): Promise<unknown> {
+  private async request(path: string, init: RequestInit, mutation = false, timeoutMs = 60_000): Promise<unknown> {
     const bodyBytes = init.body ? Buffer.byteLength(String(init.body), "utf8") : 0;
     if (bodyBytes > this.config.maxInputBytes) throw new BridgeError("request_too_large", "request exceeds configured input limit");
     let response: Response;
@@ -374,10 +374,12 @@ export class ManagedClient {
         ...init,
         headers: { ...(init.headers ?? {}), authorization: `Bearer ${this.authorizationToken}` },
         redirect: "error",
-        signal: AbortSignal.timeout(65_000)
+        signal: AbortSignal.timeout(Math.max(1, timeoutMs))
       });
     } catch {
-      throw new BridgeError("upstream_unreachable", "Symphony loopback service is unavailable");
+      throw new BridgeError(mutation ? "mutation_outcome_uncertain" : "upstream_unreachable", mutation
+        ? "The mutation may have reached Symphony; inspect state using the same request_id before retrying"
+        : "Symphony loopback service is unavailable");
     }
     let parsed: unknown = null;
     try {
@@ -394,7 +396,9 @@ export class ManagedClient {
             bytes += value.byteLength;
             if (bytes > MAX_RESPONSE_BYTES) {
               await reader.cancel().catch(() => undefined);
-              throw new BridgeError("upstream_response_too_large", "Symphony response exceeds the bridge limit", response.status);
+              throw new BridgeError(mutation ? "mutation_outcome_uncertain" : "upstream_response_too_large", mutation
+                ? "The mutation response could not be bounded safely; inspect state using the same request_id before retrying"
+                : "Symphony response exceeds the bridge limit", response.status);
             }
             chunks.push(Buffer.from(value));
           }
@@ -405,9 +409,16 @@ export class ManagedClient {
         parsed = text ? JSON.parse(text) : null;
       }
     } catch (error) {
-      if (error instanceof BridgeError) throw error;
+      if (error instanceof BridgeError) {
+        if (mutation && error.code !== "mutation_outcome_uncertain" && response.ok) {
+          throw new BridgeError("mutation_outcome_uncertain", "The mutation response could not be understood; inspect state using the same request_id before retrying", response.status);
+        }
+        throw error;
+      }
+      if (mutation) throw new BridgeError("mutation_outcome_uncertain", "The mutation response could not be understood; inspect state using the same request_id before retrying", response.status);
       throw new BridgeError("upstream_invalid_response", response.ok ? "Symphony returned invalid JSON" : `Symphony request failed with HTTP ${response.status}`, response.status);
     }
+    if (mutation && response.ok && (!parsed || typeof parsed !== "object" || Array.isArray(parsed))) throw new BridgeError("mutation_outcome_uncertain", "The mutation response could not be understood; inspect state using the same request_id before retrying", response.status);
     if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed, this.authorizationToken), response.status);
     return parsed;
   }

@@ -1,35 +1,56 @@
 import { statSync } from "node:fs";
-import { resolve, win32 } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 
-export function toWslPath(input: string): string {
-  const absolute = win32.resolve(input);
-  const match = /^([A-Za-z]):[\\/](.*)$/.exec(absolute);
-  if (!match) throw new Error("plugin path must be on a local Windows drive");
-  return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
+/** All private plugin state has one Windows root and no alternate path translation. */
+export interface OrchestrationPaths {
+  root: string;
+  releases: string;
+  config: string;
+  state: string;
+  logs: string;
+  workspaces: string;
+  current: string;
+  previous: string;
+  token: string;
+  /** Private provider environment captured for the controller process. */
+  controllerEnvironment: string;
+  bridgeConfig: string;
+  launcher: string;
+  runner: string;
+  taskXml: string;
+  metadata: string;
+  mutex: string;
 }
 
-export function toWslServicePath(input: string): string {
-  if (input.startsWith("/")) return input;
-  return toWslPath(input);
-}
-
-export function fromWslPath(input: string): string {
-  const match = /^\/mnt\/([A-Za-z])\/(.*)$/.exec(input);
-  if (!match) throw new Error("WSL path must be on a local Windows drive");
-  return win32.resolve(`${match[1].toUpperCase()}:\\${match[2].replaceAll("/", "\\")}`);
-}
-
-export function resolvedScriptPath(input: string | undefined): string {
-  return toWslPath(assertMcpEntrypoint(input));
+export function orchestrationPaths(env: NodeJS.ProcessEnv = process.env, testRoot?: string): OrchestrationPaths {
+  const localAppData = env.LOCALAPPDATA?.trim() || join(env.USERPROFILE?.trim() || homedir(), "AppData", "Local");
+  const root = resolve(testRoot || join(localAppData, "CodexOrchestration"));
+  const config = join(root, "config");
+  const state = join(root, "state");
+  return {
+    root,
+    releases: join(root, "releases"),
+    config,
+    state,
+    logs: join(root, "logs"),
+    workspaces: join(root, "workspaces"),
+    current: join(root, "current"),
+    previous: join(root, "previous"),
+    token: join(config, "token"),
+    controllerEnvironment: join(config, "controller-env.json"),
+    bridgeConfig: join(config, "config.json"),
+    launcher: join(root, "run-orchestration.cmd"),
+    runner: join(root, "run-orchestration.ps1"),
+    taskXml: join(root, "task.xml"),
+    metadata: join(root, "installation.json"),
+    mutex: join(state, "lifecycle.lock")
+  };
 }
 
 export function assertMcpEntrypoint(input: string | undefined): string {
   const candidate = input ?? resolve("mcp/server.mjs");
-  const hostPath = /^\/mnt\/[A-Za-z]\//.test(candidate)
-    ? fromWslPath(candidate)
-    : /^[A-Za-z]:[\\/]/.test(candidate)
-      ? win32.resolve(candidate)
-      : resolve(candidate);
+  const hostPath = isAbsolute(candidate) ? resolve(candidate) : resolve(candidate);
   let details;
   try {
     details = statSync(hostPath);

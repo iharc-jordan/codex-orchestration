@@ -1,10 +1,10 @@
-import { execFileSync, spawn } from "node:child_process";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { asBridgeError, BridgeError, ControlArgs, ControlOperation, ManagedClient, type ManagedStateArgs } from "./client.js";
 import { validateConfig } from "./config.js";
-import { assertMcpEntrypoint, resolvedScriptPath, toWslPath } from "./paths.js";
 
 const controlOperations: ControlOperation[] = ["register_pm", "claim", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review", "handoff"];
 const operatorOnlyOperations = new Set<ControlOperation>(["bind_project", "operator_takeover"]);
@@ -342,9 +342,9 @@ function errorResult(error: unknown) {
   return { isError: true, content: [{ type: "text", text: `${safe.code}: ${safe.message}` }] };
 }
 
-async function runBridge(): Promise<void> {
+export async function runBridge(testRoot?: string): Promise<void> {
   const server = new Server(
-    { name: "codex-orchestration", version: "0.2.0" },
+    { name: "codex-orchestration", version: "0.3.0" },
     { capabilities: { tools: {} } }
   );
 
@@ -353,14 +353,14 @@ async function runBridge(): Promise<void> {
     try {
       const name = request.params.name;
       const caller = nativeCaller(request as typeof request & { params: { _meta?: unknown } });
-      if (name === "orchestration_diagnostics") return jsonResult(await validateConfig());
+      if (name === "orchestration_diagnostics") return jsonResult(await validateConfig(testRoot));
       if (name === "orchestration_state") {
-        const client = await ManagedClient.fromConfig(caller?.threadId);
+        const client = await ManagedClient.fromConfig(caller?.threadId, testRoot);
         const args = request.params.arguments ?? {};
         return jsonResult(await client.state(args as ManagedStateArgs));
       }
       if (name === "orchestration_events") {
-        const client = await ManagedClient.fromConfig(caller?.threadId);
+        const client = await ManagedClient.fromConfig(caller?.threadId, testRoot);
         const args = request.params.arguments ?? {};
         return jsonResult(await client.events(args.after as number, args.wait_ms as number, args.limit as number));
       }
@@ -374,7 +374,7 @@ async function runBridge(): Promise<void> {
         if (!isJsonObject(args) || !("args" in args)) {
           throw new BridgeError("args_invalid", "args is required and must be supplied by the caller");
         }
-        const client = await ManagedClient.fromConfig(pmCaller.threadId);
+        const client = await ManagedClient.fromConfig(pmCaller.threadId, testRoot);
         return jsonResult(await client.control({
           request_id: args.request_id as string,
           operation,
@@ -393,84 +393,6 @@ async function runBridge(): Promise<void> {
   await server.connect(new StdioServerTransport());
 }
 
-function runWindowsLauncher(): void {
-  const hostScript = assertMcpEntrypoint(process.argv[1]);
-  const script = resolvedScriptPath(hostScript);
-  const configuredNode = process.env.CODEX_ORCHESTRATION_WSL_NODE?.trim();
-  const wslNode = configuredNode || resolveWslNode();
-  const environment = { ...process.env };
-  for (const name of ["CODEX_ORCHESTRATION_CONFIG", "XDG_CONFIG_HOME"]) {
-    const value = environment[name];
-    if (value && /^[A-Za-z]:[\\/]/.test(value)) environment[name] = toWslPath(value);
-  }
-  const forwardedEnvironment = ["CODEX_ORCHESTRATION_CONFIG", "XDG_CONFIG_HOME"]
-    .flatMap((name) => environment[name] ? [`${name}=${environment[name]}`] : []);
-  const child = spawn("wsl.exe", ["-d", "Ubuntu", "--", "env", ...forwardedEnvironment, wslNode, script, ...process.argv.slice(2)], {
-    stdio: ["pipe", "inherit", "inherit"],
-    windowsHide: true,
-    env: environment
-  });
-  let shuttingDown = false;
-  let forceKillTimer: NodeJS.Timeout | undefined;
-  const forceKill = () => {
-    if (child.exitCode !== null || !child.pid) return;
-    const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true
-    });
-    killer.once("error", () => undefined);
-    killer.unref();
-  };
-  const shutdown = () => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    if (child.exitCode !== null) return;
-    process.stdin.unpipe(child.stdin);
-    child.stdin.end();
-    forceKillTimer = setTimeout(forceKill, 2000);
-    forceKillTimer.unref();
-  };
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
-  process.stdin.once("end", () => shutdown());
-  process.stdin.once("close", () => shutdown());
-  child.stdin.on("error", () => shutdown());
-  process.stdin.pipe(child.stdin);
-  child.once("error", (error) => {
-    if (forceKillTimer) clearTimeout(forceKillTimer);
-    process.stderr.write(`codex-orchestration: could not start the Ubuntu MCP bridge: ${error.message}\n`);
-    process.exitCode = 1;
-  });
-  child.once("close", (code) => {
-    if (forceKillTimer) clearTimeout(forceKillTimer);
-    process.exitCode = code ?? 1;
-    process.stdin.pause();
-  });
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  await runBridge();
 }
-
-function resolveWslNode(): string {
-  let output: string;
-  try {
-    output = execFileSync("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lc", "node -p process.execPath"], {
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 10000
-    });
-  } catch {
-    throw new Error("Ubuntu WSL did not resolve a Linux Node runtime within 10 seconds; check WSL startup or set CODEX_ORCHESTRATION_WSL_NODE");
-  }
-  const candidate = output.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^\/(?!mnt\/)[^\r\n]+\/node$/.test(line)).pop();
-  if (!candidate) throw new Error("Ubuntu WSL did not return a Linux Node runtime; set CODEX_ORCHESTRATION_WSL_NODE");
-  return candidate;
-}
-
-if (process.platform === "win32") {
-  try {
-    runWindowsLauncher();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "could not start the Windows MCP bridge";
-    process.stderr.write(`codex-orchestration: ${message}\n`);
-    process.exitCode = 1;
-  }
-}
-else await runBridge();

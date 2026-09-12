@@ -1,133 +1,127 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import test from "node:test";
-import { toWslPath } from "../dist/paths.js";
+import { promisify } from "node:util";
+import { orchestrationPaths } from "../dist/paths.js";
+import { boundedStartupLogCause, configuredWorkflow, freshStartupLogCause, resolveCodexLauncher, runnerContent, scheduledTaskXml, scrubControllerEnvironment, validateReleaseManifest, workerCommand } from "../dist/lifecycle.js";
 
-const execFileAsync = promisify(execFile);
-const pluginPath = process.platform === "win32" ? toWslPath(process.cwd()) : process.cwd();
+const execFile = promisify(execFileCallback);
 
-async function wslNodePath() {
-  const { stdout } = await execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lic", "node -p process.execPath"]);
-  return stdout.trim().split(/\r?\n/).filter((line) => line.startsWith("/")).pop();
-}
+test("startup diagnostics surface only the bounded terminal BEAM atom", () => {
+  assert.equal(boundedStartupLogCause("Application exited: ** (EXIT) :missing_github_projects_token"), "missing_github_projects_token");
+  assert.equal(boundedStartupLogCause("secret=do-not-return\nordinary failure"), undefined);
+  assert.equal(freshStartupLogCause("** (EXIT) :missing_github_projects_token", 1_999, 2_000), undefined);
+  assert.equal(freshStartupLogCause("** (EXIT) :missing_github_projects_token", 2_000, 2_000), "missing_github_projects_token");
+});
 
-async function wsl(node, args) {
-  return execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", node, ...args], { maxBuffer: 1_048_576 });
-}
+test("one path resolver keeps private Windows state below CodexOrchestration", () => {
+  const paths = orchestrationPaths({ LOCALAPPDATA: "C:\\Users\\Test\\AppData\\Local", CODEX_ORCHESTRATION_HOME: "D:\\hidden-override" });
+  assert.equal(paths.root, "C:\\Users\\Test\\AppData\\Local\\CodexOrchestration");
+  for (const path of [paths.releases, paths.config, paths.state, paths.logs, paths.workspaces, paths.current, paths.previous, paths.bridgeConfig, paths.controllerEnvironment]) assert.ok(path.startsWith(paths.root + "\\"));
+  assert.doesNotMatch(JSON.stringify(paths), /wsl|systemd|linux/i);
+});
 
-async function wslCommand(args) {
-  return execFileAsync("wsl.exe", ["-d", "Ubuntu", "--", ...args], { maxBuffer: 1_048_576 });
-}
-
-async function writeWslFile(node, path, content, mode = "600") {
-  const script = "const fs=require('node:fs'); const mode=parseInt(process.argv[3],8); fs.writeFileSync(process.argv[1], Buffer.from(process.argv[2], 'base64'), { mode }); fs.chmodSync(process.argv[1], mode);";
-  await wsl(node, ["-e", script, path, Buffer.from(content).toString("base64"), mode]);
-}
-
-async function runCli(node, args) {
-  return wsl(node, [`${pluginPath}/mcp/cli.mjs`, ...args]);
-}
-
-const fakeSymphony = `#!/bin/sh
-exec python3 - "$@" <<'PY'
-import json
-import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-args = sys.argv[1:]
-port = int(args[args.index("--port") + 1])
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path.startswith("/api/v1/managed/state"):
-            self.send_response(200)
-            self.send_header("content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"state": "READY", "revision": 1, "latest_cursor": 0}).encode())
-        else:
-            self.send_error(404)
-
-    def do_POST(self):
-        length = int(self.headers.get("content-length", "0"))
-        body = json.loads(self.rfile.read(length) or "{}")
-        self.send_response(200)
-        self.send_header("content-type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({"accepted": True, "request_id": body.get("request_id")}).encode())
-
-    def log_message(self, *_args):
-        pass
-
-HTTPServer(("127.0.0.1", port), Handler).serve_forever()
-PY
-`;
-
-test("disposable lifecycle installs, upgrades, rolls back, stops, and uninstalls safely", async (t) => {
-  const node = await wslNodePath();
-  const root = `/tmp/Codex Orchestration lifecycle ${process.pid}-${Date.now()}`;
-  const service = `codex-orchestration-test-${process.pid}`;
-  const fake = `${root}/input/symphony`;
-  const workflow = `${root}/input/WORKFLOW.md`;
-  const retiredHelper = `${root}/retired-plugin/mcp/cli.mjs`;
-  const options = ["--root", root, "--service-name", service];
-  let installed = false;
-  let uninstalled = false;
-  await wslCommand(["mkdir", "-p", `${root}/input`]);
-  await writeWslFile(node, fake, fakeSymphony, "755");
-  await writeWslFile(node, workflow, `managed:\n  checkout_helper_path: ${retiredHelper}\n`, "600");
-  t.after(async () => {
-    if (installed && !uninstalled) {
-      await wslCommand(["systemctl", "--user", "disable", "--now", `${service}.service`]);
-    }
-    await wslCommand(["rm", "-rf", root]);
-    await wslCommand(["systemctl", "--user", "daemon-reload"]);
+test("worker App Server command uses the public npm shim through cmd.exe", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "codex-orchestration-launcher-"));
+  const launcher = join(root, "codex.cmd"); await writeFile(launcher, "@echo off\r\n");
+  t.after(() => rm(root, { recursive: true, force: true }));
+  assert.equal(await resolveCodexLauncher(launcher), launcher);
+  assert.throws(() => workerCommand("relative\\codex.cmd"), /absolute Windows path/);
+  assert.deepEqual(workerCommand(launcher), {
+    command: "cmd.exe",
+    args: ["/d", "/s", "/c", "\"\"" + launcher + "\" app-server -c features.multi_agent=false -c features.multi_agent_v2=false\""]
   });
+});
 
-  const setup = JSON.parse((await runCli(node, ["setup", ...options, "--executable", fake, "--workflow", workflow, "--version", "r1", "--port", "18991"])).stdout);
-  installed = true;
-  assert.match(setup.wrapper, /Codex Orchestration lifecycle/);
-  assert.match(setup.helper, /checkout-helper\.mjs$/);
-  const stagedHelper = await wslCommand(["cat", setup.helper]);
-  assert.match(stagedHelper.stdout, /codex-orchestration/);
-  const installedWorkflow = await wslCommand(["cat", setup.workflow]);
-  assert.ok(installedWorkflow.stdout.includes(`checkout_helper_path: "${setup.helper}"`));
-  assert.ok(!installedWorkflow.stdout.includes(retiredHelper));
-  await wslCommand(["rm", "-rf", `${root}/retired-plugin`]);
-  await wslCommand(["test", "-f", setup.helper]);
-  const unit = await wslCommand(["cat", setup.unit]);
-  assert.match(unit.stdout, /flock|KillMode=control-group/);
-  const wrapper = await wslCommand(["cat", setup.wrapper]);
-  assert.match(wrapper.stdout, /--nonblock/);
-  assert.match(wrapper.stdout, /--managed/);
-  const diagnostic = JSON.parse((await runCli(node, ["diagnostics", ...options])).stdout);
-  assert.equal(diagnostic.service.enabled, false);
-  assert.equal(diagnostic.release.endsWith("/r1/symphony"), true);
+test("worker secrets and task identity are removed case-insensitively without stripping worker profile discovery", () => {
+  const clean = scrubControllerEnvironment({
+    PATH: "C:\\Windows", USERPROFILE: "C:\\Users\\Test", APPDATA: "C:\\Users\\Test\\AppData\\Roaming", CODEX_HOME: "C:\\Users\\Test\\.codex",
+    github_TOKEN: "secret", codex_THREAD_id: "thread", SYMPHONY_TASK_ID: "task", SYMPHONY_UNEXPECTED: "unexpected", NORMAL_WORKER_SETTING: "ok"
+  });
+  assert.equal(clean.github_TOKEN, undefined); assert.equal(clean.codex_THREAD_id, undefined); assert.equal(clean.SYMPHONY_TASK_ID, undefined); assert.equal(clean.SYMPHONY_UNEXPECTED, undefined);
+  assert.equal(clean.PATH, "C:\\Windows"); assert.equal(clean.USERPROFILE, "C:\\Users\\Test"); assert.equal(clean.CODEX_HOME, "C:\\Users\\Test\\.codex"); assert.equal(clean.NORMAL_WORKER_SETTING, "ok");
+});
 
-  await runCli(node, ["start", ...options]);
-  const active = await runCli(node, ["diagnostics", ...options]);
-  assert.equal(JSON.parse(active.stdout).service.active, true);
-  await runCli(node, ["pause", ...options]);
-  await runCli(node, ["resume", ...options]);
+test("workflow replaces legacy command and args with the validated launcher", () => {
+  const launcher = "C:\\Users\\Test\\AppData\\Roaming\\npm\\codex.cmd";
+  const workflow = "workspace:\n  root: C:\\work\ncodex:\n  command: codex app-server\n  args:\n    - legacy\n  approval_policy: never\nmanaged:\n  enabled: true\n";
+  const configured = configuredWorkflow(workflow, launcher);
+  assert.match(configured, /launcher:/); assert.match(configured, /codex\.cmd/);
+  assert.doesNotMatch(configured, /command:/); assert.doesNotMatch(configured, /args:/);
+  assert.match(configured, /approval_policy: never/);
+});
 
-  await runCli(node, ["upgrade", ...options, "--executable", fake, "--version", "r2"]);
-  const upgraded = JSON.parse((await runCli(node, ["diagnostics", ...options])).stdout);
-  assert.equal(upgraded.release.endsWith("/r2/symphony"), true);
-  assert.equal(upgraded.previousRelease.endsWith("/r1/symphony"), true);
+test("workflow updater preserves four-space settings, inline maps, and the body", () => {
+  const launcher = "C:\\Users\\Test\\AppData\\Roaming\\npm\\codex.cmd";
+  const content = "---\nname: preserved\ncodex: { command: codex, args: [legacy, { mode: old }], approval_policy: never, nested: { keep: true } }\nother:\n    value: yes\n---\n\nBody stays byte-for-byte.\n";
+  const configured = configuredWorkflow(content, launcher);
+  assert.match(configured, /^codex: \{ launcher: "C:\\\\Users\\\\Test\\\\AppData\\\\Roaming\\\\npm\\\\codex\.cmd", approval_policy: never, nested: \{ keep: true \} \}$/m);
+  assert.doesNotMatch(configured, /command:/); assert.doesNotMatch(configured, /args:/); assert.match(configured, /other:\n    value: yes/); assert.match(configured, /Body stays byte-for-byte\./);
 
-  await runCli(node, ["rollback", ...options]);
-  const rolledBack = JSON.parse((await runCli(node, ["diagnostics", ...options])).stdout);
-  assert.equal(rolledBack.release.endsWith("/r1/symphony"), true);
-  assert.equal(rolledBack.previousRelease.endsWith("/r2/symphony"), true);
+  const fourSpace = "codex:\n    approval_policy: never\n    args:\n      - old\n    provider:\n      token: $GITHUB_TOKEN\nmanaged:\n    enabled: true\n";
+  const updated = configuredWorkflow(fourSpace, launcher);
+  assert.match(updated, /codex:\n    launcher:/); assert.match(updated, /    approval_policy: never/); assert.match(updated, /    provider:\n      token: \$GITHUB_TOKEN/); assert.match(updated, /managed:\n    enabled: true/); assert.doesNotMatch(updated, /args:/);
+});
 
-  await runCli(node, ["stop", ...options]);
-  const stopped = JSON.parse((await runCli(node, ["diagnostics", ...options])).stdout);
-  assert.equal(stopped.service.active, false);
-  await runCli(node, ["uninstall", ...options]);
-  uninstalled = true;
-  await wslCommand(["test", "-f", `${root}/config/config.json`]);
-  await wslCommand(["test", "-d", `${root}/state/journal`]);
-  await wslCommand(["test", "-d", `${root}/state/workspaces`]);
-  const linkedUnits = await wslCommand(["systemctl", "--user", "list-unit-files", "--no-legend"]);
-  assert.doesNotMatch(linkedUnits.stdout, new RegExp(`${service}\\.service`));
+test("native task and runner have the required Windows lifecycle contract", () => {
+  const paths = { ...orchestrationPaths({ LOCALAPPDATA: "C:\\Users\\Test\\AppData\\Local" }), taskName: "CodexOrchestration", workflow: "C:\\Users\\Test\\AppData\\Local\\CodexOrchestration\\config\\WORKFLOW.md" };
+  const task = scheduledTaskXml(paths, "S-1-5-21-123");
+  assert.match(task, /InteractiveToken/); assert.match(task, /LeastPrivilege/); assert.match(task, /LogonTrigger/);
+  assert.match(task, /<Hidden>true<\/Hidden>/); assert.match(task, /<ExecutionTimeLimit>PT0S/); assert.match(task, /IgnoreNew/); assert.match(task, /<Interval>PT1M<\/Interval><Count>3<\/Count>/);
+  assert.match(task, /<DisallowStartIfOnBatteries>false<\/DisallowStartIfOnBatteries>/); assert.match(task, /<StopIfGoingOnBatteries>false<\/StopIfGoingOnBatteries>/);
+  assert.match(task, /<Command>powershell\.exe<\/Command>/); assert.match(task, /-WindowStyle Hidden/); assert.match(task, /-File &quot;.*run-orchestration\.ps1&quot;/);
+  assert.doesNotMatch(task, /<Command>cmd\.exe<\/Command>/);
+  const runner = runnerContent(paths, 8787);
+  for (const name of ["SYMPHONY_WORKFLOW_PATH", "SYMPHONY_LOGS_ROOT", "SYMPHONY_STATE_ROOT", "SYMPHONY_WORKSPACES_ROOT", "SYMPHONY_CONTROL_TOKEN_FILE", "SYMPHONY_WINDOWS_WORKER_HOST", "SYMPHONY_SERVER_HOST", "SYMPHONY_SERVER_PORT", "SYMPHONY_MANAGED"]) assert.match(runner, new RegExp(name));
+  assert.match(runner, /ConvertFrom-Json/); assert.match(runner, /\$bridge\.port/); assert.doesNotMatch(runner, /SYMPHONY_SERVER_PORT = '8787'/);
+  assert.match(runner, /bin\\symphony\.bat/); assert.match(runner, /RELEASE_DISTRIBUTION = 'none'/);
+  assert.match(runner, /CodexOrchestrationController/); assert.match(runner, /controller-process\.json/);
+  assert.match(runner, /SYMPHONY_WINDOWS_WORKER_HOST @controllerArgs/); assert.doesNotMatch(runner, /& \$entry start/);
+});
+
+test("runner resolves private controller provider auth for the native controller", async (t) => {
+  if (process.platform !== "win32") { t.skip("native Windows runner"); return; }
+  const root = await mkdtemp(join(tmpdir(), "codex-orchestration-runner-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const paths = { ...orchestrationPaths({}, root), taskName: "CodexOrchestrationRunnerTest", workflow: join(root, "config", "WORKFLOW.md") };
+  const release = join(paths.releases, "0.3.0", "bin"); const output = join(root, "controller-env.txt");
+  await mkdir(release, { recursive: true }); await mkdir(paths.config, { recursive: true });
+  await writeFile(paths.current, "0.3.0\n"); await writeFile(paths.token, "bridge-secret\n");
+  await writeFile(paths.bridgeConfig, JSON.stringify({ host: "127.0.0.1", port: 8787, token_file: paths.token }));
+  await writeFile(paths.controllerEnvironment, JSON.stringify({ GITHUB_TOKEN: "private-controller-token" }));
+  const helper = join(release, "symphony-worker-host.exe");
+  const helperSource = "using System; using System.IO; public static class Fixture { public static int Main(string[] args) { File.WriteAllText(Environment.GetEnvironmentVariable(\"CODEX_ORCHESTRATION_TEST_OUTPUT\"), (Environment.GetEnvironmentVariable(\"GITHUB_TOKEN\") ?? \"\") + \"__\" + (Environment.GetEnvironmentVariable(\"SYMPHONY_TASK_ID\") ?? \"\")); return 0; } }";
+  const encodedSource = Buffer.from(helperSource, "utf16le").toString("base64");
+  const compileHelper = "$source = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('" + encodedSource + "')); Add-Type -TypeDefinition $source -Language CSharp -OutputAssembly '" + helper.replaceAll("'", "''") + "' -OutputType ConsoleApplication";
+  await execFile("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", compileHelper], { windowsHide: true });
+  await writeFile(join(release, "symphony.bat"), "@echo off\r\nexit /b 0\r\n");
+  await writeFile(paths.runner, runnerContent(paths, 8787));
+  await execFile("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", paths.runner], { windowsHide: true, env: { ...process.env, CODEX_ORCHESTRATION_TEST_OUTPUT: output, GITHUB_TOKEN: "inherited-stale-token", SYMPHONY_TASK_ID: "spoofed-task" } });
+  assert.equal((await readFile(output, "utf8")).trim(), "private-controller-token__");
+  await writeFile(paths.controllerEnvironment, JSON.stringify({ GITHUB_TOKEN: "private-controller-token", sYmPhOnY_tAsK_iD: "spoofed-private-task" }));
+  await assert.rejects(() => execFile("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", paths.runner], { windowsHide: true }), /invalid controller environment/i);
+});
+
+test("release manifests pin the approved GitHub release and a SHA-256", () => {
+  const manifest = { repository: "iharc-jordan/symphony", version: "0.3.0", runtimeDownloadUrl: "https://github.com/iharc-jordan/symphony/releases/download/v0.3.0/symphony-windows.zip", sha256: "a".repeat(64), distribution: "none", cookieFile: "absent" };
+  assert.deepEqual(validateReleaseManifest(manifest), manifest);
+  assert.throws(() => validateReleaseManifest({ ...manifest, runtimeDownloadUrl: "https://example.invalid/release.zip" }), /GitHub release/);
+  assert.throws(() => validateReleaseManifest({ ...manifest, sha256: "not-a-digest" }), /SHA-256/);
+  assert.throws(() => validateReleaseManifest({ ...manifest, distribution: "sname" }), /distribution/);
+});
+
+test("published plugin bundles the exact paired runtime manifest", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../release-manifest.json", import.meta.url), "utf8"));
+  assert.deepEqual(validateReleaseManifest(manifest), {
+    repository: "iharc-jordan/symphony",
+    version: "0.3.0",
+    runtimeDownloadUrl: "https://github.com/iharc-jordan/symphony/releases/download/v0.3.0/symphony-0.3.0-windows-x64.zip",
+    sha256: "28c3a3596d0b379ba52c1a51c93c1fa5c7f4844724cda9e9ea4d1114a7168a48",
+    distribution: "none",
+    cookieFile: "absent"
+  });
+  assert.equal(manifest.sourceCommit, "b56f0a6c4d54ba7eb30b51f165d7ce7635959c5f");
 });

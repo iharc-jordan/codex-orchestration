@@ -1,17 +1,18 @@
 import { readFile } from "node:fs/promises";
-import { CheckoutError, prepareTrustedCheckout, type CheckoutOptions } from "./checkout.js";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { BridgeError, ManagedClient, type ControlOperation, type ControlRequest } from "./client.js";
 import { LifecycleError, diagnostics, pause, rollback, resume, setup, start, stop, uninstall, upgrade, validateConfigForHost, type LifecycleOptions } from "./lifecycle.js";
+import { isLifecycleMutation, runLifecycleTaskChild, runLifecycleViaTask } from "./lifecycle_task.js";
 
 const usage = `Usage:
   codex-orchestration validate-config
-  codex-orchestration diagnostics [--root PATH] [--service-name NAME]
-  codex-orchestration setup --executable PATH --workflow PATH [--version VERSION] [--port PORT]
+  codex-orchestration diagnostics
+  codex-orchestration setup (--release-manifest PATH | --executable ZIP --sha256 SHA256) --workflow PATH [--version VERSION] [--port PORT]
   codex-orchestration start [setup options]
   codex-orchestration pause | resume | stop | rollback | uninstall
-  codex-orchestration upgrade --executable PATH [--version VERSION]
-  codex-orchestration control --input PATH
-  codex-orchestration checkout --input PATH [--policy PATH]`;
+  codex-orchestration upgrade (--release-manifest PATH | --executable ZIP --sha256 SHA256) [--version VERSION]
+  codex-orchestration control --input PATH`;
 
 const OPERATOR_CONTROL_OPERATIONS = new Set<ControlOperation>(["bind_project", "pause", "resume", "operator_takeover"]);
 const CONTROL_INPUT_MAX_BYTES = 1_048_576;
@@ -26,34 +27,16 @@ function parseOptions(values: string[]): LifecycleOptions {
     const value = values[++index];
     if (!value || value.startsWith("--")) throw new LifecycleError("usage", `${name} requires a value`);
     if (key === "executable") options.executable = value;
+    else if (key === "release-manifest") options.releaseManifest = value;
+    else if (key === "sha256") options.sha256 = value;
     else if (key === "workflow") options.workflow = value;
     else if (key === "version") options.version = value;
-    else if (key === "host") options.host = value;
     else if (key === "port") options.port = Number(value);
     else if (key === "token-file") options.tokenFile = value;
-    else if (key === "root") options.root = value;
-    else if (key === "service-name") options.serviceName = value;
+    else if (key === "launcher") options.launcher = value;
     else throw new LifecycleError("usage", `unknown option: ${name}`);
   }
-  if (options.root) process.env.CODEX_ORCHESTRATION_HOME = options.root;
-  if (options.serviceName) process.env.CODEX_ORCHESTRATION_SERVICE_NAME = options.serviceName;
   return options;
-}
-
-function parseCheckoutOptions(values: string[]): CheckoutOptions {
-  let inputFile: string | undefined;
-  let policyFile: string | undefined;
-  for (let index = 0; index < values.length; index += 1) {
-    const name = values[index];
-    if (name === "--help") throw new CheckoutError("usage", usage);
-    if (name !== "--input" && name !== "--policy") throw new CheckoutError("usage", `unknown option: ${name}`);
-    const value = values[++index];
-    if (!value || value.startsWith("--")) throw new CheckoutError("usage", `${name} requires a value`);
-    if (name === "--input") inputFile = value;
-    else policyFile = value;
-  }
-  if (!inputFile) throw new CheckoutError("usage", "checkout requires --input PATH");
-  return { inputFile, policyFile };
 }
 
 function parseControlOptions(values: string[]): string {
@@ -114,12 +97,12 @@ async function readControlEnvelope(inputFile: string): Promise<ControlRequest> {
   return { request_id: requestId, operation: operation as ControlOperation, args } as ControlRequest;
 }
 
-async function control(inputFile: string): Promise<unknown> {
+async function control(inputFile: string, testRoot?: string): Promise<unknown> {
   const request = await readControlEnvelope(inputFile);
   try {
     // The operator token is loaded only from the trusted bridge configuration;
     // the private envelope carries no credential or caller identity.
-    const client = await ManagedClient.fromConfig();
+    const client = await ManagedClient.fromConfig(undefined, testRoot);
     return await client.control(request);
   } catch (error) {
     if (error instanceof BridgeError) throw new LifecycleError(error.code, error.message, error.status);
@@ -131,34 +114,54 @@ function print(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
-try {
-  const [command = "help", ...args] = process.argv.slice(2);
-  if (command === "validate-config") {
-    const diagnostic = await validateConfigForHost();
-    print(diagnostic);
-    process.exitCode = diagnostic.valid ? 0 : 1;
-  } else if (command === "help") {
-    console.log(usage);
-    process.exitCode = 0;
-  } else if (command === "checkout") {
-    print(await prepareTrustedCheckout(parseCheckoutOptions(args)));
-  } else if (command === "control") {
-    print(await control(parseControlOptions(args)));
-  } else {
+async function lifecycleMutation(command: string, args: string[], deadlineAt?: number): Promise<unknown> {
+  const options = parseOptions(args);
+  options.deadlineAt = deadlineAt;
+  if (command === "setup") return setup(options);
+  if (command === "start") return start(options);
+  if (command === "pause") return pause(options);
+  if (command === "resume") return resume(options);
+  if (command === "stop") return stop(options);
+  if (command === "upgrade") return upgrade(options);
+  if (command === "rollback") return rollback(options);
+  if (command === "uninstall") return uninstall(options);
+  throw new LifecycleError("usage", `unknown lifecycle command: ${command}`);
+}
+
+export async function runCli(argv: string[] = process.argv.slice(2), testRoot?: string): Promise<number> {
+  try {
+    const [command = "help", ...args] = argv;
+    if (command === "--lifecycle-task-child") {
+      if (args.length !== 2) throw new LifecycleError("lifecycle_task_request_invalid", "lifecycle task child requires a request path and nonce");
+      return runLifecycleTaskChild(args[0], args[1], lifecycleMutation);
+    }
+    if (isLifecycleMutation(command)) return runLifecycleViaTask(process.argv[1], [command, ...args]);
+    if (command === "validate-config") {
+      const diagnostic = await validateConfigForHost(testRoot);
+      print(diagnostic);
+      return diagnostic.valid ? 0 : 1;
+    }
+    if (command === "help") {
+      console.log(usage);
+      return 0;
+    }
+    if (command === "control") {
+      print(await control(parseControlOptions(args), testRoot));
+      return 0;
+    }
     const options = parseOptions(args);
-    if (command === "diagnostics") print(await diagnostics(options));
-    else if (command === "setup") print(await setup(options));
-    else if (command === "start") print(await start(options));
-    else if (command === "pause") print(await pause(options));
-    else if (command === "resume") print(await resume(options));
-    else if (command === "stop") print(await stop(options));
-    else if (command === "upgrade") print(await upgrade(options));
-    else if (command === "rollback") print(await rollback(options));
-    else if (command === "uninstall") print(await uninstall(options));
-    else throw new LifecycleError("usage", `unknown command: ${command}\n${usage}`);
+    if (command === "diagnostics") {
+      print(await diagnostics(options));
+      return 0;
+    }
+    throw new LifecycleError("usage", `unknown command: ${command}\n${usage}`);
+  } catch (error) {
+    const lifecycle = error instanceof LifecycleError ? error : new LifecycleError("lifecycle_error", "The orchestration lifecycle command failed");
+    console.error(`${lifecycle.code}: ${lifecycle.message}`);
+    return lifecycle.code === "usage" ? 2 : 1;
   }
-} catch (error) {
-  const lifecycle = error instanceof LifecycleError || error instanceof CheckoutError ? error : new LifecycleError("lifecycle_error", "The orchestration lifecycle command failed");
-  console.error(`${lifecycle.code}: ${lifecycle.message}`);
-  process.exitCode = lifecycle.code === "usage" ? 2 : 1;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  process.exitCode = await runCli();
 }

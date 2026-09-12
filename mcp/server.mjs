@@ -2983,7 +2983,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve3.call(this, root, ref);
+      let _sch = resolve4.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3010,7 +3010,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve3(root, ref) {
+    function resolve4(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3840,7 +3840,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve3(baseURI, relativeURI, options) {
+    function resolve4(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -3873,49 +3873,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative, options, skipNormalization) {
+    function resolveComponent(base, relative2, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative = parse3(serialize(relative, options), options);
+        relative2 = parse3(serialize(relative2, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative.scheme) {
-        target.scheme = relative.scheme;
-        target.userinfo = relative.userinfo;
-        target.host = relative.host;
-        target.port = relative.port;
-        target.path = removeDotSegments(relative.path || "");
-        target.query = relative.query;
+      if (!options.tolerant && relative2.scheme) {
+        target.scheme = relative2.scheme;
+        target.userinfo = relative2.userinfo;
+        target.host = relative2.host;
+        target.port = relative2.port;
+        target.path = removeDotSegments(relative2.path || "");
+        target.query = relative2.query;
       } else {
-        if (relative.userinfo !== void 0 || relative.host !== void 0 || relative.port !== void 0) {
-          target.userinfo = relative.userinfo;
-          target.host = relative.host;
-          target.port = relative.port;
-          target.path = removeDotSegments(relative.path || "");
-          target.query = relative.query;
+        if (relative2.userinfo !== void 0 || relative2.host !== void 0 || relative2.port !== void 0) {
+          target.userinfo = relative2.userinfo;
+          target.host = relative2.host;
+          target.port = relative2.port;
+          target.path = removeDotSegments(relative2.path || "");
+          target.query = relative2.query;
         } else {
-          if (!relative.path) {
+          if (!relative2.path) {
             target.path = base.path;
-            if (relative.query !== void 0) {
-              target.query = relative.query;
+            if (relative2.query !== void 0) {
+              target.query = relative2.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative.path[0] === "/") {
-              target.path = removeDotSegments(relative.path);
+            if (relative2.path[0] === "/") {
+              target.path = removeDotSegments(relative2.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative.path;
+                target.path = "/" + relative2.path;
               } else if (!base.path) {
-                target.path = relative.path;
+                target.path = relative2.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative2.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative.query;
+            target.query = relative2.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3923,7 +3923,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative.fragment;
+      target.fragment = relative2.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4208,7 +4208,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve3,
+      resolve: resolve4,
       resolveComponent,
       equal,
       serialize,
@@ -7196,9 +7196,6 @@ var require_dist = __commonJS({
     exports.default = formatsPlugin;
   }
 });
-
-// src/server.ts
-import { execFileSync, spawn } from "node:child_process";
 
 // node_modules/zod/v4/core/util.js
 var util_exports = {};
@@ -15491,7 +15488,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
+        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -15508,7 +15505,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -15586,7 +15583,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve3(parseResult.data);
+            resolve4(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -15847,12 +15844,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve3, interval);
+      const timeoutId = setTimeout(resolve4, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -16728,132 +16725,144 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve3) => {
+    return new Promise((resolve4) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve3();
+        resolve4();
       } else {
-        this._stdout.once("drain", resolve3);
+        this._stdout.once("drain", resolve4);
       }
     });
   }
 };
 
+// src/server.ts
+import { resolve as resolve3 } from "node:path";
+import { fileURLToPath } from "node:url";
+
 // src/client.ts
 import { createHmac } from "node:crypto";
 
 // src/config.ts
-import { readFile, stat } from "node:fs/promises";
-import { homedir, platform } from "node:os";
-import { dirname, isAbsolute, join, resolve as resolve2 } from "node:path";
+import { lstat, readFile } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { dirname, isAbsolute as isAbsolute2, relative, resolve as resolve2, sep } from "node:path";
+import { promisify } from "node:util";
 
 // src/paths.ts
-import { statSync } from "node:fs";
-import { resolve, win32 } from "node:path";
-function toWslPath(input) {
-  const absolute = win32.resolve(input);
-  const match = /^([A-Za-z]):[\\/](.*)$/.exec(absolute);
-  if (!match) throw new Error("plugin path must be on a local Windows drive");
-  return `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
-}
-function fromWslPath(input) {
-  const match = /^\/mnt\/([A-Za-z])\/(.*)$/.exec(input);
-  if (!match) throw new Error("WSL path must be on a local Windows drive");
-  return win32.resolve(`${match[1].toUpperCase()}:\\${match[2].replaceAll("/", "\\")}`);
-}
-function resolvedScriptPath(input) {
-  return toWslPath(assertMcpEntrypoint(input));
-}
-function assertMcpEntrypoint(input) {
-  const candidate = input ?? resolve("mcp/server.mjs");
-  const hostPath = /^\/mnt\/[A-Za-z]\//.test(candidate) ? fromWslPath(candidate) : /^[A-Za-z]:[\\/]/.test(candidate) ? win32.resolve(candidate) : resolve(candidate);
-  let details;
-  try {
-    details = statSync(hostPath);
-  } catch {
-    throw new Error(`MCP server entrypoint is missing from the installed plugin package: ${hostPath}. Reinstall the plugin package or refresh its installation.`);
-  }
-  if (!details.isFile()) throw new Error(`MCP server entrypoint is not a regular file: ${hostPath}. Reinstall the plugin package or refresh its installation.`);
-  return hostPath;
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
+function orchestrationPaths(env = process.env, testRoot) {
+  const localAppData = env.LOCALAPPDATA?.trim() || join(env.USERPROFILE?.trim() || homedir(), "AppData", "Local");
+  const root = resolve(testRoot || join(localAppData, "CodexOrchestration"));
+  const config2 = join(root, "config");
+  const state = join(root, "state");
+  return {
+    root,
+    releases: join(root, "releases"),
+    config: config2,
+    state,
+    logs: join(root, "logs"),
+    workspaces: join(root, "workspaces"),
+    current: join(root, "current"),
+    previous: join(root, "previous"),
+    token: join(config2, "token"),
+    controllerEnvironment: join(config2, "controller-env.json"),
+    bridgeConfig: join(config2, "config.json"),
+    launcher: join(root, "run-orchestration.cmd"),
+    runner: join(root, "run-orchestration.ps1"),
+    taskXml: join(root, "task.xml"),
+    metadata: join(root, "installation.json"),
+    mutex: join(state, "lifecycle.lock")
+  };
 }
 
 // src/config.ts
+var execFile = promisify(execFileCallback);
 var DEFAULT_MAX_INPUT_BYTES = 16 * 1024;
 var ConfigError = class extends Error {
-  code;
   constructor(code, message) {
     super(message);
-    this.name = "ConfigError";
     this.code = code;
+    this.name = "ConfigError";
   }
+  code;
 };
-function configFilePath() {
-  const explicit = process.env.CODEX_ORCHESTRATION_CONFIG;
-  if (explicit?.trim()) return resolve2(explicit);
-  const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
-  return join(configHome, "codex-orchestration", "config.json");
+function configFilePath(testRoot) {
+  return orchestrationPaths(process.env, testRoot).bridgeConfig;
+}
+function fileErrorCode(error2) {
+  const code = error2?.code;
+  return typeof code === "string" && /^E[A-Z0-9_]+$/.test(code) ? ` (${code})` : "";
 }
 function safeConfigError(error2) {
   if (error2 instanceof ConfigError) return error2;
   if (error2 instanceof SyntaxError) return new ConfigError("config_invalid", "Configuration must contain valid JSON");
   return new ConfigError("config_unreadable", `Configuration could not be read${fileErrorCode(error2)}; check filesystem availability and permissions`);
 }
-function fileErrorCode(error2) {
-  const code = error2?.code;
-  return typeof code === "string" && /^E[A-Z0-9_]+$/.test(code) ? ` (${code})` : "";
-}
-function isLoopbackHost(host) {
-  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
-}
-async function loadConfig() {
-  const path = configFilePath();
+async function loadConfig(testRoot) {
+  const path = configFilePath(testRoot);
   let value;
   try {
     value = JSON.parse(await readFile(path, "utf8"));
   } catch (error2) {
-    if (error2.code === "ENOENT") {
-      throw new ConfigError("config_missing", `Configuration file not found: ${path}`);
-    }
+    if (error2.code === "ENOENT") throw new ConfigError("config_missing", `Configuration file not found: ${path}`);
     throw safeConfigError(error2);
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ConfigError("config_invalid", "Configuration must be a JSON object");
-  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ConfigError("config_invalid", "Configuration must be a JSON object");
   const raw = value;
-  const host = raw.host;
   const port = raw.port;
   const token = raw.token_file;
   const maxInputBytes = raw.max_input_bytes ?? DEFAULT_MAX_INPUT_BYTES;
-  if (!isLoopbackHost(host)) {
-    throw new ConfigError("config_non_loopback", "host must be localhost, 127.0.0.1, or ::1");
-  }
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new ConfigError("config_port_invalid", "port must be an integer from 1 through 65535");
-  }
-  if (typeof token !== "string" || token.trim() === "") {
-    throw new ConfigError("config_token_invalid", "token_file must be a non-empty path");
-  }
-  if (!Number.isInteger(maxInputBytes) || maxInputBytes < 1024 || maxInputBytes > DEFAULT_MAX_INPUT_BYTES) {
-    throw new ConfigError("config_input_limit_invalid", "max_input_bytes must be between 1024 and 16384");
-  }
-  const tokenFile = platform() === "win32" && /^\/mnt\/[A-Za-z]\//.test(token) ? fromWslPath(token) : isAbsolute(token) ? resolve2(token) : resolve2(dirname(path), token);
+  if (raw.host !== "127.0.0.1") throw new ConfigError("config_non_loopback", "host must be 127.0.0.1");
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ConfigError("config_port_invalid", "port must be an integer from 1 through 65535");
+  if (typeof token !== "string" || !token.trim()) throw new ConfigError("config_token_invalid", "token_file must be a non-empty path");
+  if (!Number.isInteger(maxInputBytes) || maxInputBytes < 1024 || maxInputBytes > DEFAULT_MAX_INPUT_BYTES) throw new ConfigError("config_input_limit_invalid", "max_input_bytes must be between 1024 and 16384");
+  const tokenFile = isAbsolute2(token) ? resolve2(token) : resolve2(dirname(path), token);
+  const root = resolve2(orchestrationPaths(process.env, testRoot).root);
+  const outside = relative(root, tokenFile);
+  if (!outside || isAbsolute2(outside) || outside === ".." || outside.startsWith(".." + sep)) throw new ConfigError("config_token_outside_root", "token_file must remain inside the private orchestration root");
   await verifyTokenFile(tokenFile);
-  return { host, port, tokenFile, maxInputBytes };
+  return { host: "127.0.0.1", port, tokenFile, maxInputBytes };
+}
+function psQuote(value) {
+  return "'" + value.replaceAll("'", "''") + "'";
+}
+async function verifyWindowsTokenAcl(tokenFile) {
+  if (process.platform !== "win32") return;
+  const script = [
+    "$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+    "$acl = (New-Object System.IO.FileInfo(" + psQuote(tokenFile) + ")).GetAccessControl()",
+    "$ownerSid = $acl.Owner",
+    "try { $ownerSid = (New-Object System.Security.Principal.NTAccount($acl.Owner)).Translate([Security.Principal.SecurityIdentifier]).Value } catch {}",
+    "if ($ownerSid -ne $sid) { exit 79 }",
+    "$rules = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])",
+    // Atomic token creation inherits the private current-user ACE from the
+    // protected config directory. Inheritance is safe only when that ACE is
+    // still scoped to the current SID; reject every other identity regardless
+    // of whether its ACE is explicit or inherited.
+    "$bad = @($rules | Where-Object { $_.IdentityReference.Value -ne $sid })",
+    "if ($bad.Count -gt 0) { exit 80 }",
+    "[Console]::WriteLine('ok')"
+  ].join("; ");
+  try {
+    const result = await execFile("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, maxBuffer: 65536 });
+    if (!String(result.stdout).includes("ok")) throw new Error("acl verification did not complete");
+  } catch {
+    throw new ConfigError("config_token_permissions", "token_file ACL must be private to the current Windows user");
+  }
 }
 async function verifyTokenFile(tokenFile) {
   let details;
   try {
-    details = await stat(tokenFile);
+    details = await lstat(tokenFile);
   } catch (error2) {
-    if (error2.code === "ENOENT") {
-      throw new ConfigError("config_token_missing", "token_file does not exist");
-    }
+    if (error2.code === "ENOENT") throw new ConfigError("config_token_missing", "token_file does not exist");
     throw new ConfigError("config_token_unreadable", `token_file could not be inspected${fileErrorCode(error2)}`);
   }
   if (!details.isFile()) throw new ConfigError("config_token_invalid", "token_file must be a regular file");
-  if (platform() !== "win32" && (details.mode & 63) !== 0) {
-    throw new ConfigError("config_token_permissions", "token_file permissions are too broad; use owner-only permissions");
-  }
+  if (process.platform !== "win32" && (details.mode & 63) !== 0) throw new ConfigError("config_token_permissions", "token_file permissions must be private to the current user");
+  await verifyWindowsTokenAcl(tokenFile);
 }
 async function readToken(config2) {
   try {
@@ -16865,10 +16874,10 @@ async function readToken(config2) {
     throw new ConfigError("config_token_unreadable", `token_file could not be read${fileErrorCode(error2)}`);
   }
 }
-async function validateConfig() {
-  const configFile = configFilePath();
+async function validateConfig(testRoot) {
+  const configFile = configFilePath(testRoot);
   try {
-    const config2 = await loadConfig();
+    const config2 = await loadConfig(testRoot);
     return { valid: true, configFile, host: config2.host, port: config2.port, tokenFile: config2.tokenFile, maxInputBytes: config2.maxInputBytes };
   } catch (error2) {
     const safe = safeConfigError(error2);
@@ -16957,13 +16966,13 @@ var ManagedClient = class _ManagedClient {
   config;
   trustedThreadId;
   authorizationToken;
-  static async fromConfig(trustedThreadId) {
-    const config2 = await loadConfig();
+  static async fromConfig(trustedThreadId, testRoot) {
+    const config2 = await loadConfig(testRoot);
     return new _ManagedClient(config2, await readToken(config2), trustedThreadId);
   }
-  async state(args = {}) {
+  async state(args = {}, timeoutMs = 6e4) {
     const query = stateQuery(args);
-    return this.request(`/api/v1/managed/state${query}`, { method: "GET" });
+    return this.request(`/api/v1/managed/state${query}`, { method: "GET" }, false, timeoutMs);
   }
   async events(after, waitMs, limit) {
     if (!Number.isInteger(after) || after < 0) throw new BridgeError("events_after_invalid", "after must be a non-negative integer");
@@ -16985,9 +16994,9 @@ var ManagedClient = class _ManagedClient {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request)
-    });
+    }, true);
   }
-  async request(path, init) {
+  async request(path, init, mutation = false, timeoutMs = 6e4) {
     const bodyBytes = init.body ? Buffer.byteLength(String(init.body), "utf8") : 0;
     if (bodyBytes > this.config.maxInputBytes) throw new BridgeError("request_too_large", "request exceeds configured input limit");
     let response;
@@ -16996,10 +17005,10 @@ var ManagedClient = class _ManagedClient {
         ...init,
         headers: { ...init.headers ?? {}, authorization: `Bearer ${this.authorizationToken}` },
         redirect: "error",
-        signal: AbortSignal.timeout(65e3)
+        signal: AbortSignal.timeout(Math.max(1, timeoutMs))
       });
     } catch {
-      throw new BridgeError("upstream_unreachable", "Symphony loopback service is unavailable");
+      throw new BridgeError(mutation ? "mutation_outcome_uncertain" : "upstream_unreachable", mutation ? "The mutation may have reached Symphony; inspect state using the same request_id before retrying" : "Symphony loopback service is unavailable");
     }
     let parsed = null;
     try {
@@ -17016,7 +17025,7 @@ var ManagedClient = class _ManagedClient {
             bytes += value.byteLength;
             if (bytes > MAX_RESPONSE_BYTES) {
               await reader.cancel().catch(() => void 0);
-              throw new BridgeError("upstream_response_too_large", "Symphony response exceeds the bridge limit", response.status);
+              throw new BridgeError(mutation ? "mutation_outcome_uncertain" : "upstream_response_too_large", mutation ? "The mutation response could not be bounded safely; inspect state using the same request_id before retrying" : "Symphony response exceeds the bridge limit", response.status);
             }
             chunks.push(Buffer.from(value));
           }
@@ -17027,9 +17036,16 @@ var ManagedClient = class _ManagedClient {
         parsed = text ? JSON.parse(text) : null;
       }
     } catch (error2) {
-      if (error2 instanceof BridgeError) throw error2;
+      if (error2 instanceof BridgeError) {
+        if (mutation && error2.code !== "mutation_outcome_uncertain" && response.ok) {
+          throw new BridgeError("mutation_outcome_uncertain", "The mutation response could not be understood; inspect state using the same request_id before retrying", response.status);
+        }
+        throw error2;
+      }
+      if (mutation) throw new BridgeError("mutation_outcome_uncertain", "The mutation response could not be understood; inspect state using the same request_id before retrying", response.status);
       throw new BridgeError("upstream_invalid_response", response.ok ? "Symphony returned invalid JSON" : `Symphony request failed with HTTP ${response.status}`, response.status);
     }
+    if (mutation && response.ok && (!parsed || typeof parsed !== "object" || Array.isArray(parsed))) throw new BridgeError("mutation_outcome_uncertain", "The mutation response could not be understood; inspect state using the same request_id before retrying", response.status);
     if (!response.ok) throw new BridgeError("upstream_error", safeMessage(response.status, parsed, this.authorizationToken), response.status);
     return parsed;
   }
@@ -17364,9 +17380,9 @@ function errorResult(error2) {
   const safe = asBridgeError(error2);
   return { isError: true, content: [{ type: "text", text: `${safe.code}: ${safe.message}` }] };
 }
-async function runBridge() {
+async function runBridge(testRoot) {
   const server = new Server(
-    { name: "codex-orchestration", version: "0.2.0" },
+    { name: "codex-orchestration", version: "0.3.0" },
     { capabilities: { tools: {} } }
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
@@ -17374,14 +17390,14 @@ async function runBridge() {
     try {
       const name = request.params.name;
       const caller = nativeCaller(request);
-      if (name === "orchestration_diagnostics") return jsonResult(await validateConfig());
+      if (name === "orchestration_diagnostics") return jsonResult(await validateConfig(testRoot));
       if (name === "orchestration_state") {
-        const client = await ManagedClient.fromConfig(caller?.threadId);
+        const client = await ManagedClient.fromConfig(caller?.threadId, testRoot);
         const args = request.params.arguments ?? {};
         return jsonResult(await client.state(args));
       }
       if (name === "orchestration_events") {
-        const client = await ManagedClient.fromConfig(caller?.threadId);
+        const client = await ManagedClient.fromConfig(caller?.threadId, testRoot);
         const args = request.params.arguments ?? {};
         return jsonResult(await client.events(args.after, args.wait_ms, args.limit));
       }
@@ -17395,7 +17411,7 @@ async function runBridge() {
         if (!isJsonObject(args) || !("args" in args)) {
           throw new BridgeError("args_invalid", "args is required and must be supplied by the caller");
         }
-        const client = await ManagedClient.fromConfig(pmCaller.threadId);
+        const client = await ManagedClient.fromConfig(pmCaller.threadId, testRoot);
         return jsonResult(await client.control({
           request_id: args.request_id,
           operation,
@@ -17410,82 +17426,9 @@ async function runBridge() {
   server.onclose = () => process.exit(0);
   await server.connect(new StdioServerTransport());
 }
-function runWindowsLauncher() {
-  const hostScript = assertMcpEntrypoint(process.argv[1]);
-  const script = resolvedScriptPath(hostScript);
-  const configuredNode = process.env.CODEX_ORCHESTRATION_WSL_NODE?.trim();
-  const wslNode = configuredNode || resolveWslNode();
-  const environment = { ...process.env };
-  for (const name of ["CODEX_ORCHESTRATION_CONFIG", "XDG_CONFIG_HOME"]) {
-    const value = environment[name];
-    if (value && /^[A-Za-z]:[\\/]/.test(value)) environment[name] = toWslPath(value);
-  }
-  const forwardedEnvironment = ["CODEX_ORCHESTRATION_CONFIG", "XDG_CONFIG_HOME"].flatMap((name) => environment[name] ? [`${name}=${environment[name]}`] : []);
-  const child = spawn("wsl.exe", ["-d", "Ubuntu", "--", "env", ...forwardedEnvironment, wslNode, script, ...process.argv.slice(2)], {
-    stdio: ["pipe", "inherit", "inherit"],
-    windowsHide: true,
-    env: environment
-  });
-  let shuttingDown = false;
-  let forceKillTimer;
-  const forceKill = () => {
-    if (child.exitCode !== null || !child.pid) return;
-    const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true
-    });
-    killer.once("error", () => void 0);
-    killer.unref();
-  };
-  const shutdown = () => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    if (child.exitCode !== null) return;
-    process.stdin.unpipe(child.stdin);
-    child.stdin.end();
-    forceKillTimer = setTimeout(forceKill, 2e3);
-    forceKillTimer.unref();
-  };
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
-  process.stdin.once("end", () => shutdown());
-  process.stdin.once("close", () => shutdown());
-  child.stdin.on("error", () => shutdown());
-  process.stdin.pipe(child.stdin);
-  child.once("error", (error2) => {
-    if (forceKillTimer) clearTimeout(forceKillTimer);
-    process.stderr.write(`codex-orchestration: could not start the Ubuntu MCP bridge: ${error2.message}
-`);
-    process.exitCode = 1;
-  });
-  child.once("close", (code) => {
-    if (forceKillTimer) clearTimeout(forceKillTimer);
-    process.exitCode = code ?? 1;
-    process.stdin.pause();
-  });
+if (process.argv[1] && resolve3(process.argv[1]) === resolve3(fileURLToPath(import.meta.url))) {
+  await runBridge();
 }
-function resolveWslNode() {
-  let output;
-  try {
-    output = execFileSync("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lc", "node -p process.execPath"], {
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 1e4
-    });
-  } catch {
-    throw new Error("Ubuntu WSL did not resolve a Linux Node runtime within 10 seconds; check WSL startup or set CODEX_ORCHESTRATION_WSL_NODE");
-  }
-  const candidate = output.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^\/(?!mnt\/)[^\r\n]+\/node$/.test(line)).pop();
-  if (!candidate) throw new Error("Ubuntu WSL did not return a Linux Node runtime; set CODEX_ORCHESTRATION_WSL_NODE");
-  return candidate;
-}
-if (process.platform === "win32") {
-  try {
-    runWindowsLauncher();
-  } catch (error2) {
-    const message = error2 instanceof Error ? error2.message : "could not start the Windows MCP bridge";
-    process.stderr.write(`codex-orchestration: ${message}
-`);
-    process.exitCode = 1;
-  }
-} else await runBridge();
+export {
+  runBridge
+};

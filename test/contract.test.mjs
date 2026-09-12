@@ -19,6 +19,14 @@ function assertAssignmentFence(args, scoped = true) {
 
 test("managed contract fixture covers the typed bridge envelope without private examples", () => {
   const http = fixture.http;
+  assert.deepEqual(fixture.workflow_managed, {
+    enabled: true,
+    store_path: "$SYMPHONY_STATE_ROOT\\managed.sqlite3",
+    control_token_file: "$SYMPHONY_CONTROL_TOKEN_FILE",
+    event_limit: 100,
+    event_wait_ms: 5000
+  });
+  assert.doesNotMatch(JSON.stringify(fixture.workflow_managed), /journal|managed\.log/i);
   assert.deepEqual(http.state.response, {
     revision: 0,
     cursor: 0,

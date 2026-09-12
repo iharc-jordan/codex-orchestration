@@ -1,801 +1,795 @@
-import { access, chmod, copyFile, lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { execFile as nodeExecFile } from "node:child_process";
-import { promisify } from "node:util";
-import { homedir, platform } from "node:os";
-import { dirname, join, resolve, win32 } from "node:path";
+import { execFile as execFileCallback } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { BridgeError, ManagedClient, type ManagedState } from "./client.js";
 import { validateConfig, type ConfigDiagnostic } from "./config.js";
-import { toWslPath, toWslServicePath } from "./paths.js";
+import { orchestrationPaths, type OrchestrationPaths } from "./paths.js";
 
-const execFile = promisify(nodeExecFile);
-const SERVICE_NAME_PATTERN = /^[A-Za-z0-9_.@-]{1,80}$/;
-const RELEASE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const DEFAULT_HOST = "127.0.0.1";
+const execFile = promisify(execFileCallback);
 const DEFAULT_PORT = 8787;
-
-export interface LifecyclePaths {
-  configRoot: string;
-  dataRoot: string;
-  stateRoot: string;
-  releasesRoot: string;
-  currentRelease: string;
-  previousRelease: string;
-  wrapper: string;
-  workflow: string;
-  token: string;
-  bridgeConfig: string;
-  logsRoot: string;
-  journalRoot: string;
-  workspacesRoot: string;
-  lock: string;
-  unit: string;
-  launcher: string;
-  helper: string;
-  taskXml: string;
-  metadata: string;
-  enabledMarker: string;
-  serviceName: string;
-  taskName: string;
-}
+const RELEASE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const TASK_NAME = "CodexOrchestration";
+const READY_TIMEOUT_MS = 60_000;
+const CONTROLLER_ENV_NAME = /^(?:GITHUB_TOKEN|GH_TOKEN|GITHUB_APP_ID|GITHUB_APP_INSTALLATION_ID|GITHUB_APP_PRIVATE_KEY|GITHUB_API_URL|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_(?:TOKEN|API_KEY|API_TOKEN|CLIENT_ID|CLIENT_SECRET|PRIVATE_KEY))$/i;
+const CONTROLLER_IDENTITY_NAME = /(?:^|_)(?:thread|task|assignment|conversation|pm|owner|identity|symphony)(?:_|$)/i;
 
 export interface LifecycleOptions {
   executable?: string;
+  releaseManifest?: string;
+  sha256?: string;
   workflow?: string;
   version?: string;
-  host?: string;
   port?: number;
   tokenFile?: string;
-  serviceName?: string;
-  root?: string;
+  launcher?: string;
+  /** Internal absolute deadline supplied by the transient lifecycle task. */
+  deadlineAt?: number;
 }
+export type LifecyclePaths = OrchestrationPaths & { taskName: string; workflow: string; };
+export class LifecycleError extends Error { constructor(readonly code: string, message: string, readonly status?: number) { super(message); this.name = "LifecycleError"; } }
 
-export interface CommandResult {
-  stdout: string;
-  stderr: string;
-  code: number;
+function paths(options: LifecycleOptions = {}): LifecyclePaths {
+  const base = orchestrationPaths();
+  return { ...base, taskName: TASK_NAME, workflow: join(base.config, "WORKFLOW.md") };
 }
-
-export class LifecycleError extends Error {
-  readonly code: string;
-  readonly status?: number;
-
-  constructor(code: string, message: string, status?: number) {
-    super(message);
-    this.name = "LifecycleError";
-    this.code = code;
-    this.status = status;
+async function run(command: string, args: string[], allowFailure = false): Promise<{ stdout: string; stderr: string; code: number }> {
+  try { const value = await execFile(command, args, { windowsHide: true, maxBuffer: 1_048_576 }); return { stdout: value.stdout, stderr: value.stderr, code: 0 }; }
+  catch (cause) {
+    const value = cause as { stdout?: string; stderr?: string; code?: number };
+    if (allowFailure) return { stdout: value.stdout || "", stderr: value.stderr || "", code: typeof value.code === "number" ? value.code : 1 };
+    const output = String(value.stderr || value.stdout || "").trim().slice(0, 500);
+    throw new LifecycleError("command_failed", command + " " + args.join(" ") + " failed" + (output ? ": " + output : ""), value.code);
   }
 }
-
-export function lifecyclePaths(env: NodeJS.ProcessEnv = process.env, os = platform()): LifecyclePaths {
-  const home = env.USERPROFILE || env.HOME || homedir();
-  const root = env.CODEX_ORCHESTRATION_HOME?.trim();
-  const configBase = env.XDG_CONFIG_HOME?.trim() || join(home, ".config");
-  const dataBase = env.XDG_DATA_HOME?.trim() || join(home, ".local", "share");
-  const stateBase = env.XDG_STATE_HOME?.trim() || join(home, ".local", "state");
-  const configRoot = root ? join(root, "config") : join(configBase, "codex-orchestration");
-  const dataRoot = root ? join(root, "data") : join(dataBase, "codex-orchestration");
-  const stateRoot = root ? join(root, "state") : join(stateBase, "codex-orchestration");
-  const serviceName = env.CODEX_ORCHESTRATION_SERVICE_NAME?.trim() || "codex-orchestration.service";
-  const serviceIdentity = serviceName.replace(/\.service$/, "");
-  if (!SERVICE_NAME_PATTERN.test(serviceIdentity) || serviceIdentity === "." || serviceIdentity === "..") {
-    throw new LifecycleError("service_name_invalid", "service name contains unsupported characters");
-  }
-  const taskName = env.CODEX_ORCHESTRATION_TASK_NAME?.trim() || `Codex-Orchestration-${randomBytes(4).toString("hex")}`;
-  const unitRoot = root ? join(root, "systemd", "user") : os === "win32" ? join(configRoot, "systemd", "user") : join(configBase, "systemd", "user");
-  return {
-    configRoot,
-    dataRoot,
-    stateRoot,
-    releasesRoot: join(dataRoot, "releases"),
-    currentRelease: join(dataRoot, "current-release"),
-    previousRelease: join(dataRoot, "previous-release"),
-    wrapper: join(dataRoot, "bin", "run-managed.sh"),
-    workflow: join(configRoot, "WORKFLOW.md"),
-    token: join(configRoot, "token"),
-    bridgeConfig: join(configRoot, "config.json"),
-    logsRoot: join(stateRoot, "logs"),
-    journalRoot: join(stateRoot, "journal"),
-    workspacesRoot: join(stateRoot, "workspaces"),
-    lock: join(stateRoot, "managed.lock"),
-    unit: join(unitRoot, serviceName.endsWith(".service") ? serviceName : `${serviceName}.service`),
-    launcher: join(dataRoot, "bin", "windows-launcher.ps1"),
-    helper: join(dataRoot, "bin", "checkout-helper.mjs"),
-    taskXml: join(dataRoot, "bin", "windows-task.xml"),
-    metadata: join(dataRoot, "installation.json"),
-    enabledMarker: join(stateRoot, "service-enabled"),
-    serviceName: serviceName.endsWith(".service") ? serviceName : `${serviceName}.service`,
-    taskName
-  };
-}
-
-function hostPath(input: string): string {
-  if (platform() !== "win32" || !input.startsWith("/mnt/")) return resolve(input);
-  const match = /^\/mnt\/([a-z])\/(.*)$/i.exec(input);
-  if (!match) throw new LifecycleError("path_invalid", "WSL path must use a local mounted Windows drive");
-  return win32.resolve(`${match[1].toUpperCase()}:\\${match[2].replaceAll("/", "\\")}`);
-}
-
-function servicePath(input: string): string {
-  return platform() === "win32" ? toWslServicePath(input) : input;
-}
-
-function applyOptions(options: LifecycleOptions): void {
-  if (options.root) process.env.CODEX_ORCHESTRATION_HOME = options.root;
-  if (options.serviceName) process.env.CODEX_ORCHESTRATION_SERVICE_NAME = options.serviceName;
-}
-
-function quoteShell(input: string): string {
-  return `'${input.replaceAll("'", `'"'"'`)}'`;
-}
-
-function unitQuote(input: string): string {
-  return `"${input.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"").replaceAll("%", "%%")}"`;
-}
-
-function commandError(command: string, args: string[], error: unknown): LifecycleError {
-  const details = error as { stdout?: string; stderr?: string; code?: string | number };
-  const output = `${details.stderr || details.stdout || ""}`.trim();
-  return new LifecycleError("command_failed", `${command} ${args.join(" ")} failed${output ? `: ${output.slice(0, 500)}` : ""}`, typeof details.code === "number" ? details.code : undefined);
-}
-
-async function run(command: string, args: string[], allowFailure = false, hostCommand = false): Promise<CommandResult> {
-  const actualCommand = platform() === "win32" && !hostCommand ? "wsl.exe" : command;
-  const actualArgs = platform() === "win32" && !hostCommand ? ["-d", "Ubuntu", "--", command, ...args] : args;
-  try {
-    const result = await execFile(actualCommand, actualArgs, { windowsHide: true, maxBuffer: 1_048_576 });
-    return { stdout: result.stdout, stderr: result.stderr, code: 0 };
-  } catch (error) {
-    if (allowFailure) {
-      const details = error as { stdout?: string; stderr?: string; code?: number };
-      return { stdout: details.stdout || "", stderr: details.stderr || "", code: typeof details.code === "number" ? details.code : 1 };
-    }
-    throw commandError(command, args, error);
-  }
-}
-
-async function runHost(command: string, args: string[], allowFailure = false): Promise<CommandResult> {
-  return run(command, args, allowFailure, true);
-}
-
-function wslOptionPath(value: string): string {
-  return /^[A-Za-z]:[\\/]/.test(value) ? toWslPath(value) : value;
-}
-
-function delegatedOptionArgs(options: LifecycleOptions): string[] {
-  const args: string[] = [];
-  const values: Array<[string, string | undefined, boolean]> = [
-    ["--executable", options.executable, true],
-    ["--workflow", options.workflow, true],
-    ["--version", options.version, false],
-    ["--host", options.host, false],
-    ["--port", options.port === undefined ? undefined : String(options.port), false],
-    ["--token-file", options.tokenFile, true],
-    ["--root", options.root, true],
-    ["--service-name", options.serviceName, false]
-  ];
-  for (const [name, value, path] of values) {
-    if (value === undefined) continue;
-    args.push(name, path ? wslOptionPath(value) : value);
-  }
-  return args;
-}
-
-async function resolveWslNode(): Promise<string> {
-  let result: { stdout: string };
-  try {
-    result = await execFile("wsl.exe", ["-d", "Ubuntu", "--", "bash", "-lc", "node -p process.execPath"], {
-      windowsHide: true,
-      timeout: 10000
-    });
-  } catch {
-    throw new LifecycleError("wsl_node_missing", "Ubuntu WSL did not resolve a Linux Node runtime within 10 seconds; check WSL startup");
-  }
-  const candidate = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^\/(?!mnt\/)[^\r\n]+\/node$/.test(line)).pop();
-  if (!candidate) throw new LifecycleError("wsl_node_missing", "Ubuntu WSL did not return a Linux Node runtime");
-  return candidate;
-}
-
-async function runWslCli(command: string, options: LifecycleOptions = {}): Promise<unknown> {
-  const scriptInput = process.argv[1] || resolve("mcp/cli.mjs");
-  const script = scriptInput.startsWith("/") ? scriptInput : wslOptionPath(resolve(scriptInput));
-  const node = await resolveWslNode();
-  const unset = [
-    "CODEX_ORCHESTRATION_CONFIG",
-    "CODEX_ORCHESTRATION_HOME",
-    "CODEX_ORCHESTRATION_SERVICE_NAME",
-    "CODEX_ORCHESTRATION_TASK_NAME",
-    "XDG_CONFIG_HOME",
-    "XDG_DATA_HOME",
-    "XDG_STATE_HOME"
-  ];
-  const environment = ["env", ...unset.flatMap((name) => ["-u", name])];
-  const inherited = new Map<string, string | undefined>([
-    ["CODEX_ORCHESTRATION_HOME", options.root || process.env.CODEX_ORCHESTRATION_HOME],
-    ["CODEX_ORCHESTRATION_CONFIG", process.env.CODEX_ORCHESTRATION_CONFIG],
-    ["CODEX_ORCHESTRATION_SERVICE_NAME", options.serviceName || process.env.CODEX_ORCHESTRATION_SERVICE_NAME],
-    ["XDG_CONFIG_HOME", process.env.XDG_CONFIG_HOME],
-    ["XDG_DATA_HOME", process.env.XDG_DATA_HOME],
-    ["XDG_STATE_HOME", process.env.XDG_STATE_HOME]
-  ]);
-  for (const [name, value] of inherited) {
-    if (value) environment.push(`${name}=${name.startsWith("XDG_") || name.endsWith("_HOME") || name.endsWith("_CONFIG") ? wslOptionPath(value) : value}`);
-  }
-  const result = await runHost("wsl.exe", ["-d", "Ubuntu", "--", ...environment, node, script, command, ...delegatedOptionArgs(options)], true);
-  try {
-    const value = JSON.parse(result.stdout);
-    if (result.code !== 0 && command !== "validate-config") {
-      const output = `${result.stderr}\n${result.stdout}`.trim();
-      throw new LifecycleError("delegated_failed", output.slice(0, 500) || `WSL ${command} failed`);
-    }
-    return value;
-  } catch {
-    if (result.code !== 0) {
-      const output = `${result.stderr}\n${result.stdout}`.trim();
-      throw new LifecycleError("delegated_failed", output.slice(0, 500) || `WSL ${command} failed`);
-    }
-    throw new LifecycleError("delegated_invalid", `WSL ${command} returned invalid lifecycle JSON`);
-  }
-}
-
-function windowsKeeperPaths(linuxPaths: LifecyclePaths): LifecyclePaths {
-  const home = process.env.USERPROFILE || homedir();
-  const configuredData = process.env.XDG_DATA_HOME?.trim();
-  const dataBase = configuredData && /^[A-Za-z]:[\\/]/.test(configuredData) ? configuredData : join(home, ".local", "share");
-  const service = linuxPaths.serviceName.replace(/\.service$/, "");
-  const root = join(dataBase, "codex-orchestration", service);
-  return {
-    ...linuxPaths,
-    launcher: join(root, "bin", "windows-launcher.ps1"),
-    taskXml: join(root, "bin", "windows-task.xml"),
-    metadata: join(root, "installation.json"),
-    taskName: `Codex-Orchestration-${randomBytes(4).toString("hex")}`
-  };
-}
-
-async function writeLinuxMarker(path: string): Promise<void> {
-  await run("mkdir", ["-p", dirname(path)]);
-  await run("sh", ["-lc", `umask 077; printf '%s\\n' enabled > ${quoteShell(path)}`]);
-}
-
-async function removeLinuxMarker(path: string): Promise<void> {
-  await run("rm", ["-f", path], true);
-}
-
-async function ensureDirectory(path: string): Promise<void> {
+async function privateDirectory(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
-  if (platform() !== "win32") await chmod(path, 0o700);
+  if (process.platform !== "win32") return;
+  const sid = await currentSid();
+  const aclOk = (result: { code: number; stdout: string; stderr: string }): boolean => result.code === 0 && !/Failed processing\s+[1-9]/i.test(result.stdout + result.stderr);
+  // Reset inherited and stale explicit ACEs before granting only this user's SID.
+  const reset = await run("icacls.exe", [path, "/reset", "/t", "/c"], true);
+  if (!aclOk(reset)) throw new LifecycleError("acl_failed", "could not reset orchestration state ACLs");
+  // Grant first so removing inherited ACEs cannot strand child objects before
+  // the current SID has access to them.
+  const bootstrap = await run("icacls.exe", [path, "/grant:r", "*" + sid + ":F", "/t", "/c"], true);
+  if (!aclOk(bootstrap)) throw new LifecycleError("acl_failed", "could not bootstrap private orchestration ACLs");
+  const inheritance = await run("icacls.exe", [path, "/inheritance:r", "/t", "/c"], true);
+  if (!aclOk(inheritance)) throw new LifecycleError("acl_failed", "could not remove inherited orchestration state ACLs");
+  // Grant the current SID on every existing object, then retain inheritance
+  // on the directory itself so future atomic files receive the same ACL.
+  const acl = await run("icacls.exe", [path, "/grant:r", "*" + sid + ":F", "/t", "/c"], true);
+  if (!aclOk(acl)) throw new LifecycleError("acl_failed", "could not protect private orchestration state with the current user ACL");
+  const childAcl = await run("icacls.exe", [path, "/grant:r", "*" + sid + ":(OI)(CI)F"], true);
+  if (!aclOk(childAcl)) throw new LifecycleError("acl_failed", "could not configure private orchestration child ACL inheritance");
+  const owner = await run("icacls.exe", [path, "/setowner", "*" + sid, "/t", "/c"], true);
+  if (!aclOk(owner)) throw new LifecycleError("acl_failed", "could not set the private orchestration state owner");
 }
-
-async function writeAtomic(path: string, content: string | NodeJS.ArrayBufferView, mode = 0o600): Promise<void> {
-  await ensureDirectory(dirname(path));
-  const temp = `${path}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
-  await writeFile(temp, content, { mode });
-  if (platform() !== "win32") await chmod(temp, mode);
-  await rename(temp, path);
+async function atomic(path: string, body: string | Buffer): Promise<void> {
+  await privateDirectory(dirname(path));
+  const temporary = path + ".tmp-" + process.pid + "-" + randomBytes(4).toString("hex");
+  await writeFile(temporary, body, { mode: 0o600 }); await rename(temporary, path);
 }
-
-async function readOptional(path: string): Promise<string | undefined> {
-  try {
-    return (await readFile(path, "utf8")).trim() || undefined;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw new LifecycleError("read_failed", `could not read ${path}`);
-  }
+async function optional(path: string): Promise<string | undefined> {
+  try { return (await readFile(path, "utf8")).trim() || undefined; }
+  catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw new LifecycleError("read_failed", "could not read " + path); }
 }
-
-function validateVersion(version: string | undefined): string {
-  const value = version?.trim() || `local-${Date.now()}`;
+function releaseVersion(input: string | undefined): string {
+  const value = input?.trim() || "local-" + Date.now();
   if (!RELEASE_PATTERN.test(value)) throw new LifecycleError("version_invalid", "version must contain only letters, numbers, dots, underscores, and hyphens");
   return value;
 }
-
-function bundledHelperSource(): string {
-  const entrypoint = process.argv[1];
-  if (entrypoint && /(?:^|[\\/])mcp[\\/]cli\.mjs$/i.test(entrypoint)) return hostPath(entrypoint);
-  return resolve("mcp/cli.mjs");
+export interface RuntimeReleaseManifest { repository: "iharc-jordan/symphony"; version: "0.3.0"; runtimeDownloadUrl: string; sha256: string; distribution: "none"; cookieFile: "absent"; }
+export function validateReleaseManifest(value: unknown): RuntimeReleaseManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new LifecycleError("release_manifest_invalid", "release manifest must be an object");
+  const raw = value as Record<string, unknown>;
+  if (raw.repository !== "iharc-jordan/symphony" || raw.version !== "0.3.0") throw new LifecycleError("release_manifest_invalid", "release manifest must identify iharc-jordan/symphony version 0.3.0");
+  if (typeof raw.runtimeDownloadUrl !== "string" || typeof raw.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(raw.sha256)) throw new LifecycleError("release_manifest_invalid", "release manifest requires runtimeDownloadUrl and a SHA-256 digest");
+  if (raw.distribution !== "none" || raw.cookieFile !== "absent") throw new LifecycleError("release_manifest_invalid", "release manifest must disable Erlang distribution and omit the cookie file");
+  let url: URL;
+  try { url = new URL(raw.runtimeDownloadUrl); } catch { throw new LifecycleError("release_manifest_invalid", "runtimeDownloadUrl must be an HTTPS GitHub release URL"); }
+  if (url.protocol !== "https:" || url.hostname !== "github.com" || !url.pathname.startsWith("/iharc-jordan/symphony/releases/download/v0.3.0/")) throw new LifecycleError("release_manifest_invalid", "runtimeDownloadUrl must pin the Symphony v0.3.0 GitHub release");
+  return { repository: "iharc-jordan/symphony", version: "0.3.0", runtimeDownloadUrl: url.toString(), sha256: raw.sha256.toLowerCase(), distribution: "none", cookieFile: "absent" };
 }
-
-async function stageCheckoutHelper(paths: LifecyclePaths): Promise<void> {
-  const source = bundledHelperSource();
-  let details;
-  try {
-    details = await stat(source);
-    await access(source, constants.R_OK);
-  } catch {
-    throw new LifecycleError("helper_invalid", `bundled checkout helper is not readable: ${source}`);
-  }
-  if (!details.isFile()) throw new LifecycleError("helper_invalid", `bundled checkout helper is not a regular file: ${source}`);
-  const temporary = `${paths.helper}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
-  try {
-    await copyFile(source, temporary);
-    if (platform() !== "win32") await chmod(temporary, 0o700);
-    await rename(temporary, paths.helper);
-  } catch {
-    await rm(temporary, { force: true });
-    throw new LifecycleError("helper_stage_failed", `could not stage the checkout helper at ${paths.helper}`);
-  }
+function absolute(input: string, label: string): string {
+  if (!isAbsolute(input)) throw new LifecycleError(label + "_invalid", label + " must be an absolute Windows path");
+  return resolve(input);
 }
-
-function rewriteCheckoutHelperPath(content: string, helperPath: string): string {
-  const linePattern = /^([ \t]*checkout_helper_path:)[ \t]*(?:(?:"(?:\\.|[^"\r\n])*")|(?:'(?:''|[^'\r\n])*')|(?:[^#\r\n]*?))([ \t]*(?:#.*))?(\r?\n|$)/gm;
-  let replaced = false;
-  const result = content.replace(linePattern, (_match, prefix: string, suffix = "", end: string) => {
-    replaced = true;
-    return `${prefix} ${JSON.stringify(helperPath)}${suffix}${end}`;
-  });
-  return replaced ? result : content;
-}
-
-async function readWorkflow(paths: LifecyclePaths, options: LifecycleOptions): Promise<string> {
-  if (options.workflow) {
-    const source = hostPath(options.workflow);
-    try {
-      await access(source, constants.R_OK);
-      return await readFile(source, "utf8");
-    } catch {
-      throw new LifecycleError("workflow_invalid", `workflow is not readable: ${source}`);
-    }
-  }
-  try {
-    const existing = await readFile(paths.workflow, "utf8");
-    if (!existing.trim()) throw new LifecycleError("workflow_missing", `provide --workflow or create ${paths.workflow}`);
-    return existing;
-  } catch (error) {
-    if (error instanceof LifecycleError) throw error;
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new LifecycleError("workflow_missing", `provide --workflow or create ${paths.workflow}`);
-    throw new LifecycleError("workflow_invalid", `workflow is not readable: ${paths.workflow}`);
-  }
-}
-
-async function validateExecutable(input: string): Promise<string> {
-  const path = hostPath(input);
-  let details;
-  try {
-    details = await stat(path);
-    await access(path, constants.R_OK | (platform() === "win32" ? 0 : constants.X_OK));
-  } catch {
-    throw new LifecycleError("executable_invalid", `executable is not readable: ${path}`);
-  }
-  if (!details.isFile()) throw new LifecycleError("executable_invalid", `executable is not a regular file: ${path}`);
+async function regularFile(input: string, label: string): Promise<string> {
+  const path = absolute(input, label);
+  try { const detail = await stat(path); if (!detail.isFile()) throw new Error("not-file"); const handle = await open(path, constants.R_OK); await handle.close(); }
+  catch { throw new LifecycleError(label + "_invalid", label + " is not a readable regular file: " + path); }
   return path;
 }
 
-function serviceInvocation(paths: LifecyclePaths, port: number): string {
-  const release = `$(cat -- ${quoteShell(servicePath(paths.currentRelease))})`;
-  return [
-    "#!/bin/sh",
-    "set -eu",
-    `release=${release}`,
-    '[ -n "$release" ] || { echo "current release is empty" >&2; exit 78; }',
-    `exec /usr/bin/flock --nonblock ${quoteShell(servicePath(paths.lock))} "$release" --managed --i-understand-that-this-will-be-running-without-the-usual-guardrails --logs-root ${quoteShell(servicePath(paths.logsRoot))} --port ${port} ${quoteShell(servicePath(paths.workflow))}`,
-    ""
-  ].join("\n");
+/** The default is public npm's stable Windows shim. No desktop data is scanned. */
+export async function resolveCodexLauncher(override?: string): Promise<string> {
+  const appData = process.env.APPDATA?.trim();
+  const candidate = override?.trim() || (appData ? join(appData, "npm", "codex.cmd") : "");
+  if (!candidate) throw new LifecycleError("launcher_missing", "codex.cmd was not found at the public npm path; pass --launcher with an absolute path");
+  return regularFile(candidate, "launcher");
 }
-
-function unitContent(paths: LifecyclePaths): string {
-  const wrapper = servicePath(paths.wrapper);
-  return [
-    "[Unit]",
-    "Description=Codex Orchestration managed Symphony",
-    "After=network-online.target",
-    "Wants=network-online.target",
-    "",
-    "[Service]",
-    "Type=simple",
-    `ExecStart=${unitQuote(wrapper)}`,
-    "KillMode=control-group",
-    "Restart=on-failure",
-    "RestartSec=5s",
-    "",
-    "[Install]",
-    "WantedBy=default.target",
-    ""
-  ].join("\n");
+function cmdCommand(executable: string, fixedArgs: string[]): string {
+  const value = absolute(executable, "launcher");
+  if (/[\r\n\0]/.test(value)) throw new LifecycleError("command_invalid", "launcher arguments cannot contain control characters");
+  if (value.includes("\"")) throw new LifecycleError("command_invalid", "launcher path cannot contain a quote");
+  return "\"\"" + value + "\"" + (fixedArgs.length ? " " + fixedArgs.join(" ") : "") + "\"";
 }
-
-function windowsLauncher(paths: LifecyclePaths): string {
-  const service = paths.serviceName.replace(/\.service$/, "");
-  const marker = servicePath(paths.enabledMarker);
-  const waitScript = `while [ -f ${quoteShell(marker)} ]; do sleep 5; done`;
-  const powershellQuote = (input: string): string => `'${input.replaceAll("'", "''")}'`;
+export function workerCommand(launcher: string): { command: "cmd.exe"; args: string[] } {
+  return {
+    command: "cmd.exe",
+    args: [
+      "/d",
+      "/s",
+      "/c",
+      cmdCommand(launcher, ["app-server", "-c", "features.multi_agent=false", "-c", "features.multi_agent_v2=false"])
+    ]
+  };
+}
+/** Environment boundary for the App Server/helper worker, not the controller. */
+export function scrubControllerEnvironment(input: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const keep = new Set(["PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "TEMP", "TMP", "CODEX_HOME", "CODEX_CONFIG_DIR", "NODE_OPTIONS"]);
+  const secretOrIdentity = /(?:^|_)(?:token|secret|credential|password|authorization|cookie|thread|task|assignment|conversation|pm|owner|identity|symphony)(?:_|$)/i;
+  return Object.fromEntries(Object.entries(input).filter(([name, value]) => value !== undefined && (keep.has(name.toUpperCase()) || !secretOrIdentity.test(name)))) as NodeJS.ProcessEnv;
+}
+function launcherContent(p: LifecyclePaths, port: number): string {
+  return [
+    "@echo off", "setlocal DisableDelayedExpansion",
+    "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + p.runner + "\"",
+    "exit /b %ERRORLEVEL%", ""
+  ].join("\r\n");
+}
+function psQuote(value: string): string { return "'" + value.replaceAll("'", "''") + "'"; }
+export function runnerContent(p: LifecyclePaths, _port: number): string {
   return [
     "$ErrorActionPreference = 'Stop'",
-    `wsl.exe -d Ubuntu -- test -f ${powershellQuote(marker)}`,
-    "if ($LASTEXITCODE -ne 0) { exit 0 }",
-    `wsl.exe -d Ubuntu -- systemctl --user start ${powershellQuote(service)}`,
-    "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
-    `wsl.exe -d Ubuntu -- bash -lc ${powershellQuote(waitScript)}`,
-    "exit $LASTEXITCODE",
-    ""
-  ].join("\n");
+    "$controllerEnv = [pscustomobject]@{}",
+    "if (Test-Path -LiteralPath " + psQuote(p.controllerEnvironment) + " -PathType Leaf) { $controllerEnv = Get-Content -Raw -LiteralPath " + psQuote(p.controllerEnvironment) + " | ConvertFrom-Json }",
+    "$blocked = '(?i)(^|_)(thread|task|assignment|conversation|pm|owner|identity|symphony)(_|$)'",
+    "Get-ChildItem Env: | ForEach-Object { if ($_.Name -match $blocked -and -not ($controllerEnv.psobject.Properties.Name -contains $_.Name)) { Remove-Item -LiteralPath ('Env:' + $_.Name) } }",
+    "$controllerEnv.psobject.Properties | ForEach-Object { if ($_.Name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$' -or $_.Name -match $blocked -or $null -eq $_.Value) { throw 'invalid controller environment' }; Set-Item -LiteralPath ('Env:' + $_.Name) -Value ([string]$_.Value) }",
+    "$bridge = Get-Content -Raw -LiteralPath " + psQuote(p.bridgeConfig) + " | ConvertFrom-Json",
+    "$port = [int]$bridge.port",
+    "if ([string]$bridge.host -ne '127.0.0.1' -or $port -lt 1 -or $port -gt 65535) { exit 78 }",
+    "$bridgeTokenRaw = [string]$bridge.token_file",
+    "$bridgeToken = if ([IO.Path]::IsPathRooted($bridgeTokenRaw)) { [IO.Path]::GetFullPath($bridgeTokenRaw) } else { [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent " + psQuote(p.bridgeConfig) + ") $bridgeTokenRaw)) }",
+    "if ($bridgeToken -ne [IO.Path]::GetFullPath(" + psQuote(p.token) + ")) { exit 78 }",
+    "$release = (Get-Content -Raw -LiteralPath " + psQuote(p.current) + ").Trim()",
+    "if ($release -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { exit 78 }",
+    "$releaseRoot = Join-Path " + psQuote(p.releases) + " $release",
+    "$entry = Join-Path $releaseRoot 'bin\\symphony.bat'",
+    "if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { exit 78 }",
+    "$env:SYMPHONY_WINDOWS_WORKER_HOST = Join-Path (Split-Path -Parent $entry) 'symphony-worker-host.exe'",
+    "if (-not (Test-Path -LiteralPath $env:SYMPHONY_WINDOWS_WORKER_HOST -PathType Leaf)) { exit 78 }",
+    "$env:SYMPHONY_WORKFLOW_PATH = " + psQuote(p.workflow),
+    "$env:SYMPHONY_LOGS_ROOT = " + psQuote(p.logs),
+    "$env:SYMPHONY_STATE_ROOT = " + psQuote(p.state),
+    "$env:SYMPHONY_WORKSPACES_ROOT = " + psQuote(p.workspaces),
+    "$env:SYMPHONY_CONTROL_TOKEN_FILE = $bridgeToken",
+    "$env:SYMPHONY_SERVER_HOST = '127.0.0.1'",
+    "$env:SYMPHONY_SERVER_PORT = [string]$port",
+    "$env:SYMPHONY_MANAGED = 'true'",
+    "$env:RELEASE_DISTRIBUTION = 'none'",
+    "$env:RELEASE_COOKIE = 'codex_orchestration_local_only'",
+    "$controllerIdentity = Join-Path " + psQuote(p.state) + " 'controller-process.json'",
+    "$controllerCommand = '\"\"' + $entry + '\" start\"'",
+    "$controllerArgs = @('--parent-pid', [string]$PID, '--job-name', 'CodexOrchestrationController', '--identity-file', $controllerIdentity, '--cwd', $releaseRoot, '--attempt-id', 'controller', '--', $env:ComSpec, '/d', '/s', '/c', $controllerCommand)",
+    "& $env:SYMPHONY_WINDOWS_WORKER_HOST @controllerArgs",
+    "exit $LASTEXITCODE", ""
+  ].join("\r\n");
 }
-
-function taskXml(paths: LifecyclePaths, userSid: string): string {
-  const launcher = paths.launcher.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;");
-  const taskName = paths.taskName.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+function escapeXml(value: string): string { return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;"); }
+export function scheduledTaskXml(p: LifecyclePaths, userSid: string): string {
+  const args = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + p.runner + "\"";
   return [
     "<?xml version=\"1.0\" encoding=\"UTF-16\"?>",
     "<Task version=\"1.4\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">",
-    `  <RegistrationInfo><Description>${taskName} keeps the Ubuntu WSL session available for the enabled managed service.</Description></RegistrationInfo>`,
-    `  <Triggers><LogonTrigger><UserId>${userSid}</UserId><Enabled>true</Enabled></LogonTrigger></Triggers>`,
-    `  <Principals><Principal id=\"Author\"><UserId>${userSid}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>`,
-    "  <Settings><Enabled>false</Enabled><Hidden>true</Hidden><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy></Settings>",
-    `  <Actions Context=\"Author\"><Exec><Command>powershell.exe</Command><Arguments>-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -File &quot;${launcher}&quot;</Arguments></Exec></Actions>`,
-    "</Task>",
-    ""
-  ].join("\n");
+    "  <RegistrationInfo><Description>Codex Orchestration native Windows service</Description></RegistrationInfo>",
+    "  <Triggers><LogonTrigger><UserId>" + escapeXml(userSid) + "</UserId><Enabled>true</Enabled></LogonTrigger></Triggers>",
+    "  <Principals><Principal id=\"Author\"><UserId>" + escapeXml(userSid) + "</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>",
+    "  <Settings><Hidden>true</Hidden><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure></Settings>",
+    "  <Actions Context=\"Author\"><Exec><Command>powershell.exe</Command><Arguments>" + escapeXml(args) + "</Arguments></Exec></Actions>",
+    "</Task>", ""
+  ].join("\r\n");
 }
-
-interface InstallationMetadata {
-  serviceName?: string;
-  taskName?: string;
+async function currentSid(): Promise<string> {
+  const identity = await run("whoami.exe", ["/user"]);
+  const sid = identity.stdout.match(/S-\d-\d+(?:-\d+)+/)?.[0];
+  if (!sid) throw new LifecycleError("identity_invalid", "could not determine the current Windows user SID");
+  return sid;
 }
-
-async function readMetadata(paths: LifecyclePaths): Promise<InstallationMetadata> {
-  const raw = await readOptional(paths.metadata);
-  if (!raw) return {};
+async function taskSnapshot(p: LifecyclePaths): Promise<{ exists: boolean; running: boolean; active: boolean }> {
+  const script = "$tasks = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -eq " + psQuote(p.taskName) + " -and $_.TaskPath -eq '\\' }); if ($tasks.Count -eq 0) { [Console]::WriteLine('{\"exists\":false,\"running\":false,\"active\":false}'); exit 0 }; $state = [int]$tasks[0].State; [Console]::WriteLine((ConvertTo-Json -Compress -InputObject @{ exists = $true; running = ($state -eq 4); active = ($state -eq 2 -or $state -eq 4) }))";
+  const result = await run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], true);
+  if (result.code !== 0) throw new LifecycleError("task_inspection_failed", "could not inspect the orchestration scheduled task");
   try {
-    return JSON.parse(raw) as InstallationMetadata;
-  } catch {
-    throw new LifecycleError("metadata_invalid", "installation metadata is invalid");
-  }
+    const value = JSON.parse(result.stdout.trim()) as { exists?: unknown; running?: unknown; active?: unknown };
+    if (typeof value.exists !== "boolean" || typeof value.running !== "boolean" || typeof value.active !== "boolean") throw new Error("invalid");
+    return { exists: value.exists, running: value.running, active: value.active };
+  } catch { throw new LifecycleError("task_inspection_failed", "could not inspect the orchestration scheduled task"); }
 }
-
-type Ownership = "missing" | "owned" | "foreign";
-
-async function unitOwnership(paths: LifecyclePaths): Promise<Ownership> {
-  let details;
+async function taskExists(p: LifecyclePaths): Promise<boolean> { return (await taskSnapshot(p)).exists; }
+type NativeTaskDiagnostic = {
+  exists: boolean;
+  state?: number;
+  running: boolean;
+  active: boolean;
+  lastTaskResult?: number | null;
+  lastRunTime?: string | null;
+  nextRunTime?: string | null;
+  action?: { command: string; arguments: string; hidden: boolean };
+};
+async function taskDiagnostics(p: LifecyclePaths): Promise<NativeTaskDiagnostic> {
+  const taskName = psQuote(p.taskName);
+  const script = [
+    "$tasks = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -eq " + taskName + " -and $_.TaskPath -eq '\\' })",
+    "if ($tasks.Count -eq 0) { [Console]::WriteLine('{\"exists\":false,\"running\":false,\"active\":false}'); exit 0 }",
+    "$task = $tasks[0]",
+    "$state = [int]$task.State",
+    "$info = Get-ScheduledTaskInfo -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction Stop",
+    "$lastRun = if ($null -eq $info.LastRunTime) { $null } else { ([datetime]$info.LastRunTime).ToString('o') }",
+    "$nextRun = if ($null -eq $info.NextRunTime) { $null } else { ([datetime]$info.NextRunTime).ToString('o') }",
+    "$action = @($task.Actions)[0]",
+    "$hidden = [bool]$task.Settings.Hidden",
+    "$command = [string]$action.Execute",
+    "$taskArgs = [string]$action.Arguments",
+    "$sensitive = '(?i)(token|secret|password|authorization|cookie|credential|api[-_]?key|private[-_]?key|bearer)'",
+    "$safeCommand = if ($command -match $sensitive) { '<redacted>' } else { $command }",
+    "$safeArgs = if ($taskArgs -match $sensitive) { '<redacted>' } else { $taskArgs }",
+    "[Console]::WriteLine((ConvertTo-Json -Compress -InputObject @{ exists = $true; state = $state; running = ($state -eq 4); active = ($state -eq 2 -or $state -eq 4); lastTaskResult = [int64]$info.LastTaskResult; lastRunTime = $lastRun; nextRunTime = $nextRun; action = @{ command = $safeCommand; arguments = $safeArgs; hidden = $hidden } }))"
+  ].join("; ");
+  const result = await run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], true);
+  if (result.code !== 0) throw new LifecycleError("task_inspection_failed", "could not inspect the orchestration scheduled task");
   try {
-    details = await lstat(paths.unit);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
-    throw new LifecycleError("unit_inspection_failed", `could not inspect service unit ${paths.unit}`);
+    const value = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+    if (typeof value.exists !== "boolean" || typeof value.running !== "boolean" || typeof value.active !== "boolean") throw new Error("invalid");
+    if (!value.exists) return { exists: false, running: false, active: false };
+    if (typeof value.state !== "number") throw new Error("invalid state");
+    const action = value.action as Record<string, unknown> | undefined;
+    return {
+      exists: true,
+      state: value.state,
+      running: value.running,
+      active: value.active,
+      lastTaskResult: typeof value.lastTaskResult === "number" ? value.lastTaskResult : null,
+      lastRunTime: typeof value.lastRunTime === "string" ? value.lastRunTime : null,
+      nextRunTime: typeof value.nextRunTime === "string" ? value.nextRunTime : null,
+      action: action && typeof action.command === "string" && typeof action.arguments === "string" && typeof action.hidden === "boolean"
+        ? { command: action.command, arguments: action.arguments, hidden: action.hidden }
+        : undefined
+    };
+  } catch { throw new LifecycleError("task_inspection_failed", "could not inspect the orchestration scheduled task"); }
+}
+async function releaseEntryDiagnostics(p: LifecyclePaths, label: string | undefined): Promise<Record<string, unknown>> {
+  if (!label || !RELEASE_PATTERN.test(label)) return { label: label || null, valid: false, error: "selected release pointer is missing or invalid" };
+  const releaseRoot = join(p.releases, label);
+  const entry = join(releaseRoot, "bin", "symphony.bat");
+  const workerHost = join(releaseRoot, "bin", "symphony-worker-host.exe");
+  const environment = join(releaseRoot, "releases", label, "env.bat");
+  const cookie = join(releaseRoot, "releases", "COOKIE");
+  const isRegular = async (file: string): Promise<boolean> => { try { return (await lstat(file)).isFile(); } catch { return false; } };
+  const isAbsent = async (file: string): Promise<boolean> => { try { await lstat(file); return false; } catch (cause) { return (cause as NodeJS.ErrnoException).code === "ENOENT"; } };
+  const entryValid = await isRegular(entry);
+  const workerHostValid = await isRegular(workerHost);
+  let distributionDisabled = false;
+  try { distributionDisabled = /^(?:set )?\"?RELEASE_DISTRIBUTION=none\"?\s*$/im.test(await readFile(environment, "utf8")); } catch { distributionDisabled = false; }
+  const cookieAbsent = await isAbsent(cookie);
+  const valid = entryValid && workerHostValid && distributionDisabled && cookieAbsent;
+  return { label, entry, workerHost, environment, entryValid, workerHostValid, distributionDisabled, cookieAbsent, valid, error: valid ? undefined : "selected release must contain regular launch entries, disable Erlang distribution, and omit releases\\COOKIE" };
+}
+async function taskOwned(p: LifecyclePaths): Promise<boolean> {
+  if (!(await taskExists(p))) return true;
+  const metadata = await optional(p.metadata);
+  if (!metadata) return false;
+  try {
+    const parsed = JSON.parse(metadata) as { taskName?: unknown; root?: unknown };
+    if (parsed.taskName !== p.taskName || parsed.root !== p.root) return false;
+  } catch { return false; }
+  const task = p.taskName.replaceAll("'", "''");
+  const exported = await run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Export-ScheduledTask -TaskName '" + task + "' | Out-String"], true);
+  return exported.code === 0 && exported.stdout.includes("Codex Orchestration native Windows service") && exported.stdout.replaceAll("&quot;", "").includes(p.runner);
+}
+async function installTask(p: LifecyclePaths, port: number): Promise<void> {
+  if (!(await taskOwned(p))) throw new LifecycleError("task_owned_elsewhere", "scheduled task already exists and is not owned by this installation");
+  await atomic(p.launcher, launcherContent(p, port));
+  await atomic(p.runner, runnerContent(p, port));
+  await atomic(p.taskXml, Buffer.from("\uFEFF" + scheduledTaskXml(p, await currentSid()), "utf16le"));
+  await run("schtasks.exe", ["/Create", "/TN", p.taskName, "/XML", p.taskXml, "/F"]);
+}
+async function taskRunning(p: LifecyclePaths): Promise<boolean> {
+  return (await taskSnapshot(p)).running;
+}
+async function stopRecordedController(p: LifecyclePaths): Promise<void> {
+  const identityPath = join(p.state, "controller-process.json");
+  const identityRaw = await optional(identityPath);
+  if (!identityRaw) return;
+  const release = await optional(p.current);
+  if (!release || !RELEASE_PATTERN.test(release)) throw new LifecycleError("controller_identity_invalid", "controller identity exists without a valid selected release");
+  const helper = await regularFile(join(p.releases, release, "bin", "symphony-worker-host.exe"), "worker_host");
+  let identity: Record<string, unknown>;
+  try { identity = JSON.parse(identityRaw) as Record<string, unknown>; }
+  catch { throw new LifecycleError("controller_identity_invalid", "controller process identity is not valid JSON"); }
+  const creationMatches = Array.from(identityRaw.matchAll(/"child_creation_time"\s*:\s*(\d+)/g));
+  const pid = identity.child_pid;
+  if (identity.version !== 1 || identity.job_name !== "CodexOrchestrationController" || identity.attempt_id !== "controller" || !Number.isInteger(pid) || Number(pid) < 1 || Number(pid) > 0xffff_ffff || creationMatches.length !== 1) {
+    throw new LifecycleError("controller_identity_invalid", "controller process identity is invalid");
   }
-  if (!details.isFile() || details.isSymbolicLink()) return "foreign";
-  const content = await readFile(paths.unit, "utf8");
-  const metadata = await readMetadata(paths);
-  const expectedExec = `ExecStart=${unitQuote(servicePath(paths.wrapper))}`;
-  return metadata.serviceName === paths.serviceName &&
-    content.includes("Description=Codex Orchestration managed Symphony") &&
-    content.includes(expectedExec) ? "owned" : "foreign";
-}
-
-function normalizedTaskText(value: string): string {
-  return value.replaceAll("&quot;", "").replaceAll('"', "").replaceAll("\\", "/").toLowerCase();
-}
-
-async function taskOwnership(paths: LifecyclePaths): Promise<Ownership> {
-  if (platform() !== "win32") return "missing";
-  const query = await runHost("schtasks.exe", ["/Query", "/TN", paths.taskName, "/FO", "LIST"], true);
-  if (query.code !== 0) {
-    const output = `${query.stdout}\n${query.stderr}`;
-    if (/cannot find the file|cannot find file/i.test(output)) return "missing";
-    throw new LifecycleError("task_inspection_failed", `could not inspect scheduled task ${paths.taskName}`);
+  const args = ["--stop", "--job-name", "CodexOrchestrationController", "--pid", String(pid), "--creation-time", creationMatches[0][1]];
+  let stopped = await run(helper, args, true);
+  if (stopped.code !== 0) {
+    await new Promise((done) => setTimeout(done, 250));
+    stopped = await run(helper, args, true);
   }
-  const metadata = await readMetadata(paths);
-  const task = paths.taskName.replaceAll("'", "''");
-  const exported = await runHost("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", `Export-ScheduledTask -TaskName '${task}' | Out-String`], true);
-  if (exported.code !== 0) throw new LifecycleError("task_inspection_failed", `could not inspect scheduled task ${paths.taskName}`);
-  const content = exported.stdout;
-  const description = `${paths.taskName} keeps the Ubuntu WSL session available for the enabled managed service.`;
-  const normalized = normalizedTaskText(content);
-  return metadata.serviceName === paths.serviceName && metadata.taskName === paths.taskName &&
-    content.includes(description) && normalized.includes(normalizedTaskText(paths.launcher)) ? "owned" : "foreign";
+  if (stopped.code !== 0) throw new LifecycleError("controller_stop_failed", "could not verify termination of the owned controller Job");
+  await rm(identityPath, { force: true });
 }
-
-async function applyStoredTaskName(paths: LifecyclePaths): Promise<void> {
-  if (platform() !== "win32") return;
-  const metadata = await readMetadata(paths);
-  if (metadata.serviceName === paths.serviceName && metadata.taskName) paths.taskName = metadata.taskName;
+async function stopTask(p: LifecyclePaths): Promise<void> {
+  const before = await taskSnapshot(p);
+  await stopRecordedController(p);
+  if (!before.exists) return;
+  const afterControllerStop = await taskSnapshot(p);
+  if (afterControllerStop.active) {
+    const ended = await run("schtasks.exe", ["/End", "/TN", p.taskName], true);
+    if (ended.code !== 0) throw new LifecycleError("task_stop_failed", "could not stop the orchestration scheduled task");
+  }
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (!(await taskSnapshot(p)).active) return;
+    await new Promise((done) => setTimeout(done, 250));
+  }
+  throw new LifecycleError("task_stop_failed", "orchestration scheduled task did not stop before the release switch");
 }
-
-async function writeBridgeConfig(paths: LifecyclePaths, options: LifecycleOptions): Promise<void> {
-  const existing = await readOptional(paths.bridgeConfig);
-  let value: Record<string, unknown> = {};
+/** Stop only a task that this private installation can prove it owns. */
+export async function stopOwnedTask(p: LifecyclePaths): Promise<void> {
+  if (!(await taskOwned(p))) throw new LifecycleError("task_owned_elsewhere", "scheduled task exists and is not owned by this installation");
+  await stopTask(p);
+}
+async function readReleaseManifest(path: string): Promise<RuntimeReleaseManifest> {
+  try { return validateReleaseManifest(JSON.parse(await readFile(await regularFile(path, "release_manifest"), "utf8"))); }
+  catch (cause) { if (cause instanceof LifecycleError) throw cause; throw new LifecycleError("release_manifest_invalid", "release manifest is not valid JSON"); }
+}
+function sha256(value: string | undefined): string {
+  if (!value || !/^[a-f0-9]{64}$/i.test(value)) throw new LifecycleError("sha256_invalid", "a 64-character SHA-256 digest is required for a release ZIP");
+  return value.toLowerCase();
+}
+async function verifiedReleaseSource(p: LifecyclePaths, options: LifecycleOptions): Promise<{ path: string; downloaded: boolean }> {
+  const manifest = options.releaseManifest ? await readReleaseManifest(options.releaseManifest) : undefined;
+  const requestedSha = options.sha256 ? sha256(options.sha256) : undefined;
+  if (manifest && requestedSha && requestedSha !== manifest.sha256) throw new LifecycleError("release_hash_mismatch", "offline SHA-256 does not match the pinned release manifest");
+  const expected = manifest?.sha256 || requestedSha;
+  if (!expected) throw new LifecycleError("sha256_invalid", "a 64-character SHA-256 digest is required for a release ZIP");
+  let source: string;
+  let downloaded = false;
+  if (options.executable) source = await regularFile(options.executable, "release");
+  else {
+    if (!manifest) throw new LifecycleError("release_source_required", "provide --release-manifest or an offline --executable ZIP with --sha256");
+    source = join(p.state, "download-" + randomBytes(8).toString("hex") + ".zip"); downloaded = true;
+    let response: Response;
+    try { response = await fetch(manifest.runtimeDownloadUrl, { redirect: "follow", signal: AbortSignal.timeout(remainingDeadline(options.deadlineAt, 60_000)) }); }
+    catch { throw new LifecycleError("release_download_failed", "could not download the pinned Symphony release ZIP"); }
+    let finalUrl: URL;
+    try { finalUrl = new URL(response.url || manifest.runtimeDownloadUrl); } catch { throw new LifecycleError("release_download_failed", "pinned Symphony release URL was invalid"); }
+    const githubReleaseHosts = new Set(["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "github-releases.githubusercontent.com"]);
+    if (finalUrl.protocol !== "https:" || !githubReleaseHosts.has(finalUrl.hostname.toLowerCase())) throw new LifecycleError("release_download_failed", "pinned Symphony release redirected outside GitHub");
+    if (finalUrl.hostname.toLowerCase() === "github.com" && !finalUrl.pathname.startsWith("/iharc-jordan/symphony/releases/download/v0.3.0/")) throw new LifecycleError("release_download_failed", "pinned Symphony release redirected to an unapproved GitHub path");
+    if (!response.ok) throw new LifecycleError("release_download_failed", "could not download the pinned Symphony release ZIP");
+    await writeFile(source, Buffer.from(await response.arrayBuffer()), { mode: 0o600 });
+  }
+  if (extname(source).toLowerCase() !== ".zip") throw new LifecycleError("release_invalid", "release must be a standard Windows Mix release ZIP");
+  const actual = createHash("sha256").update(await readFile(source)).digest("hex");
+  if (actual !== expected) { if (downloaded) await rm(source, { force: true }); throw new LifecycleError("release_hash_mismatch", "release ZIP SHA-256 does not match the pinned expected digest"); }
+  return { path: source, downloaded };
+}
+async function stageRelease(p: LifecyclePaths, options: LifecycleOptions, release: string): Promise<void> {
+  const input = await verifiedReleaseSource(p, options); const source = input.path; const root = join(p.releases, release); const target = join(root, "bin", "symphony.bat"); const workerHost = join(root, "bin", "symphony-worker-host.exe"); const environment = join(root, "releases", release, "env.bat"); const cookie = join(root, "releases", "COOKIE");
+  if (extname(source).toLowerCase() !== ".zip") throw new LifecycleError("release_invalid", "release must be a standard Windows Mix release ZIP");
+  try { await stat(root); if (input.downloaded) await rm(source, { force: true }); throw new LifecycleError("release_exists", "release " + release + " already exists and is immutable"); }
+  catch (cause) { if (cause instanceof LifecycleError) throw cause; if ((cause as NodeJS.ErrnoException).code !== "ENOENT") { if (input.downloaded) await rm(source, { force: true }); throw new LifecycleError("release_invalid", "could not inspect release " + release); } }
+  await privateDirectory(root);
+  try {
+    await run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Expand-Archive -LiteralPath " + psQuote(source) + " -DestinationPath " + psQuote(root) + " -ErrorAction Stop"]);
+    const targetInfo = await lstat(target); const workerInfo = await lstat(workerHost); const environmentInfo = await lstat(environment);
+    if (!targetInfo.isFile() || !workerInfo.isFile() || !environmentInfo.isFile()) throw new Error("release entries must be files");
+    const environmentContents = await readFile(environment, "utf8");
+    if (!/^(?:set )?\"?RELEASE_DISTRIBUTION=none\"?\s*$/im.test(environmentContents)) throw new Error("release distribution must be disabled");
+    try { await lstat(cookie); throw new Error("release cookie must be absent"); }
+    catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
+  }
+  catch { await rm(root, { recursive: true, force: true }); throw new LifecycleError("release_invalid", "release ZIP must contain bin\\symphony.bat and bin\\symphony-worker-host.exe"); }
+  finally { if (input.downloaded) await rm(source, { force: true }); }
+  const old = await optional(p.current); if (old) await atomic(p.previous, old + "\n"); await atomic(p.current, release + "\n");
+}
+export function configuredWorkflow(content: string, launcher: string): string {
+  const resolvedLauncher = JSON.stringify(absolute(launcher, "launcher"));
+  const pieces = content.split(/(\r\n|\n|\r)/); const lines: Array<{ text: string; eol: string }> = [];
+  for (let index = 0; index < pieces.length; index += 2) lines.push({ text: pieces[index], eol: pieces[index + 1] || "" });
+  const first = (lines[0]?.text || "").replace(/^\uFEFF/, "").trim();
+  const frontmatterEnd = first === "---" ? lines.findIndex((line, index) => index > 0 && (line.text.trim() === "---" || line.text.trim() === "...")) : lines.length;
+  const limit = frontmatterEnd >= 0 ? frontmatterEnd : lines.length;
+  const codexIndex = lines.findIndex((line, index) => index < limit && /^codex\s*:/.test(line.text));
+  if (codexIndex < 0) throw new LifecycleError("workflow_invalid", "workflow must include a codex section");
+  const eol = lines[codexIndex].eol || lines.find((line) => line.eol)?.eol || "\r\n";
+  const codexMatch = lines[codexIndex].text.match(/^(\s*)codex\s*:\s*(.*)$/)!; const codexIndent = codexMatch[1].length; const inline = codexMatch[2].trim();
+  if (inline.startsWith("{") && inline.endsWith("}")) {
+    const fields = inlineFields(inline.slice(1, -1)).filter((field) => !/^\s*(?:command|args|launcher)\s*:/.test(field));
+    lines[codexIndex].text = codexMatch[1] + "codex: { launcher: " + resolvedLauncher + (fields.length ? ", " + fields.join(", ") : "") + " }";
+    return lines.map((line) => line.text + line.eol).join("");
+  }
+  let childIndent = codexIndent + 2; let sectionEnd = limit;
+  for (let index = codexIndex + 1; index < limit; index += 1) {
+    const text = lines[index].text; if (!text.trim() || /^\s*#/.test(text)) continue;
+    const indent = text.match(/^[ \t]*/)?.[0].length || 0;
+    if (indent <= codexIndent) { sectionEnd = index; break; }
+    childIndent = indent; break;
+  }
+  for (let index = codexIndex + 1; index < limit; index += 1) {
+    const text = lines[index].text; if (!text.trim() || /^\s*#/.test(text)) continue;
+    const indent = text.match(/^[ \t]*/)?.[0].length || 0;
+    if (indent <= codexIndent) { sectionEnd = index; break; }
+  }
+  const kept: Array<{ text: string; eol: string }> = [{ text: codexMatch[1] + "codex:", eol } , { text: " ".repeat(childIndent) + "launcher: " + resolvedLauncher, eol }];
+  let skipIndent: number | undefined;
+  for (let index = codexIndex + 1; index < sectionEnd; index += 1) {
+    const line = lines[index]; const text = line.text; const trimmed = text.trim(); const indent = text.match(/^[ \t]*/)?.[0].length || 0;
+    if (skipIndent !== undefined) {
+      if (!trimmed || indent > skipIndent) continue;
+      skipIndent = undefined;
+    }
+    const key = text.match(/^\s*(command|launcher|args)\s*:\s*(.*)$/);
+    if (indent === childIndent && key) {
+      const value = key[2].trim();
+      if (!value || value.startsWith("#") || value.startsWith("|") || value.startsWith(">")) skipIndent = indent;
+      continue;
+    }
+    kept.push(line);
+  }
+  lines.splice(codexIndex, sectionEnd - codexIndex, ...kept);
+  return lines.map((line) => line.text + line.eol).join("");
+}
+function workflowStatus(content: string): { hasLauncher: boolean; hasLegacy: boolean } {
+  const pieces = content.split(/(\r\n|\n|\r)/); const lines: Array<{ text: string; eol: string }> = [];
+  for (let index = 0; index < pieces.length; index += 2) lines.push({ text: pieces[index], eol: pieces[index + 1] || "" });
+  const first = (lines[0]?.text || "").replace(/^\uFEFF/, "").trim();
+  const frontmatterEnd = first === "---" ? lines.findIndex((line, index) => index > 0 && (line.text.trim() === "---" || line.text.trim() === "...")) : lines.length;
+  const limit = frontmatterEnd >= 0 ? frontmatterEnd : lines.length;
+  const codexIndex = lines.findIndex((line, index) => index < limit && /^codex\s*:/.test(line.text));
+  if (codexIndex < 0) return { hasLauncher: false, hasLegacy: false };
+  const header = lines[codexIndex].text.match(/^(\s*)codex\s*:\s*(.*)$/)!;
+  const codexIndent = header[1].length; const inline = header[2].trim();
+  if (inline.startsWith("{") && inline.endsWith("}")) {
+    const fields = inlineFields(inline.slice(1, -1));
+    return { hasLauncher: fields.some((field) => /^launcher\s*:/i.test(field)), hasLegacy: fields.some((field) => /^(?:command|args)\s*:/i.test(field)) };
+  }
+  let childIndent: number | undefined;
+  for (let index = codexIndex + 1; index < limit; index += 1) {
+    const text = lines[index].text; if (!text.trim() || /^\s*#/.test(text)) continue;
+    const indent = text.match(/^[ \t]*/)?.[0].length || 0;
+    if (indent <= codexIndent) break;
+    childIndent = indent; break;
+  }
+  if (childIndent === undefined) return { hasLauncher: false, hasLegacy: false };
+  let hasLauncher = false; let hasLegacy = false;
+  for (let index = codexIndex + 1; index < limit; index += 1) {
+    const text = lines[index].text; if (!text.trim() || /^\s*#/.test(text)) continue;
+    const indent = text.match(/^[ \t]*/)?.[0].length || 0;
+    if (indent <= codexIndent) break;
+    if (indent !== childIndent) continue;
+    const key = text.match(/^\s*(command|launcher|args)\s*:/i)?.[1]?.toLowerCase();
+    if (key === "launcher") hasLauncher = true;
+    if (key === "command" || key === "args") hasLegacy = true;
+  }
+  return { hasLauncher, hasLegacy };
+}
+function inlineFields(value: string): string[] {
+  const fields: string[] = []; let start = 0; let quote = ""; let depth = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (quote) { if (char === quote && value[index - 1] !== "\\") quote = ""; continue; }
+    if (char === "'" || char === '"') { quote = char; continue; }
+    if (char === "[" || char === "{" || char === "(") depth += 1;
+    else if (char === "]" || char === "}" || char === ")") depth -= 1;
+    else if (char === "," && depth === 0) { fields.push(value.slice(start, index).trim()); start = index + 1; }
+  }
+  const final = value.slice(start).trim(); if (final) fields.push(final); return fields;
+}
+async function stageWorkflow(p: LifecyclePaths, source: string | undefined, launcher: string): Promise<void> {
+  let content: string;
+  if (source) content = await readFile(await regularFile(source, "workflow"), "utf8");
+  else {
+    const current = await optional(p.workflow);
+    if (current === undefined) throw new LifecycleError("workflow_missing", "setup requires --workflow for the first install");
+    content = current;
+  }
+  await atomic(p.workflow, configuredWorkflow(content, launcher));
+}
+async function writeConfiguration(p: LifecyclePaths, options: LifecycleOptions): Promise<number> {
+  let port = options.port;
+  let existingConfig: Record<string, unknown> = {};
+  if (port === undefined) {
+    const current = await optional(p.bridgeConfig);
+    if (current) {
+      try {
+        const parsed = JSON.parse(current) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid");
+        existingConfig = parsed as Record<string, unknown>;
+        port = Number(existingConfig.port);
+      }
+      catch { throw new LifecycleError("config_invalid", "existing bridge config is not valid JSON"); }
+    }
+  } else {
+    const current = await optional(p.bridgeConfig);
+    if (current) {
+      try {
+        const parsed = JSON.parse(current) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid");
+        existingConfig = parsed as Record<string, unknown>;
+      } catch { throw new LifecycleError("config_invalid", "existing bridge config is not valid JSON"); }
+    }
+  }
+  port ??= DEFAULT_PORT;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new LifecycleError("port_invalid", "port must be an integer from 1 through 65535");
+  if (!(await optional(p.token))) {
+    const token = options.tokenFile ? (await readFile(await regularFile(options.tokenFile, "token_file"), "utf8")).trim() : randomBytes(32).toString("hex");
+    if (!token) throw new LifecycleError("token_invalid", "token file is empty"); await atomic(p.token, token + "\n");
+  }
+  await atomic(p.bridgeConfig, JSON.stringify({ ...existingConfig, host: "127.0.0.1", port, token_file: p.token, max_input_bytes: 16 * 1024 }, null, 2) + "\n");
+  return port;
+}
+async function writeControllerEnvironment(p: LifecyclePaths): Promise<void> {
+  const isAllowed = (name: string): boolean => CONTROLLER_ENV_NAME.test(name) && !CONTROLLER_IDENTITY_NAME.test(name);
+  const captured = captureControllerEnvironment(process.env);
+  const saved: Record<string, string> = {};
+  const existing = await optional(p.controllerEnvironment);
   if (existing) {
     try {
-      const parsed = JSON.parse(existing);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) value = parsed as Record<string, unknown>;
-    } catch {
-      throw new LifecycleError("config_invalid", "existing bridge config is not valid JSON");
-    }
+      const value = JSON.parse(existing) as unknown;
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid controller environment");
+      for (const [name, entry] of Object.entries(value)) {
+        if (isAllowed(name) && typeof entry === "string") saved[name] = entry;
+      }
+    } catch { throw new LifecycleError("controller_environment_invalid", "private controller environment is not valid JSON"); }
   }
-  value.host = options.host || value.host || DEFAULT_HOST;
-  value.port = options.port || value.port || DEFAULT_PORT;
-  if (!Number.isInteger(value.port) || Number(value.port) < 1 || Number(value.port) > 65535) throw new LifecycleError("port_invalid", "port must be an integer from 1 through 65535");
-  value.token_file = servicePath(paths.token);
-  value.max_input_bytes = value.max_input_bytes || 16 * 1024;
-  await writeAtomic(paths.bridgeConfig, `${JSON.stringify(value, null, 2)}\n`);
+  Object.assign(saved, captured);
+  await atomic(p.controllerEnvironment, JSON.stringify(saved, null, 2) + "\n");
 }
 
-async function writeToken(paths: LifecyclePaths, source?: string): Promise<void> {
-  if (await readOptional(paths.token)) return;
-  const value = source ? (await readFile(hostPath(source), "utf8")).trim() : randomBytes(32).toString("hex");
-  if (!value) throw new LifecycleError("token_invalid", "token file is empty");
-  await writeAtomic(paths.token, `${value}\n`);
+/** Exact provider-auth subset transferred through the private one-shot request. */
+export function captureControllerEnvironment(input: NodeJS.ProcessEnv): Record<string, string> {
+  const isAllowed = (name: string): boolean => CONTROLLER_ENV_NAME.test(name) && !CONTROLLER_IDENTITY_NAME.test(name);
+  return Object.fromEntries(
+    Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined && isAllowed(entry[0]))
+  );
 }
 
-async function installUnit(paths: LifecyclePaths): Promise<void> {
-  const ownership = await unitOwnership(paths);
-  if (ownership === "foreign") throw new LifecycleError("unit_owned_elsewhere", `service unit already exists and is not owned by this installation: ${paths.unit}`);
-  await writeAtomic(paths.unit, unitContent(paths));
-  if (platform() === "win32" || process.env.CODEX_ORCHESTRATION_HOME) {
-    await run("systemctl", ["--user", "link", servicePath(paths.unit)]);
-    await run("systemctl", ["--user", "daemon-reload"]);
-  } else {
-    await run("systemctl", ["--user", "daemon-reload"]);
-  }
+function remainingDeadline(deadlineAt: number | undefined, maximum: number): number {
+  if (deadlineAt === undefined) return maximum;
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) throw new LifecycleError("lifecycle_deadline_exceeded", "the lifecycle command exceeded its absolute deadline");
+  return Math.min(maximum, remaining);
+}
+async function acquireWindowsMutex(): Promise<() => Promise<void>> {
+  const script = "$mutex = New-Object System.Threading.Mutex($false, 'Local\\CodexOrchestrationLifecycle'); if (-not $mutex.WaitOne(0)) { exit 173 }; [Console]::Out.WriteLine('acquired'); [Console]::In.ReadLine() | Out-Null; $mutex.ReleaseMutex(); $mutex.Dispose()";
+  const holder = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const acquired = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), 5000);
+    holder.stdout.once("data", (chunk) => { clearTimeout(timer); resolve(String(chunk).trim() === "acquired"); });
+    holder.once("error", () => { clearTimeout(timer); resolve(false); });
+    holder.once("close", () => { clearTimeout(timer); resolve(false); });
+  });
+  if (!acquired) { holder.kill(); throw new LifecycleError("lifecycle_busy", "another Codex Orchestration lifecycle command is already running"); }
+  return async () => { holder.stdin.end(); if (holder.exitCode === null) await once(holder, "close"); };
+}
+async function withMutex<T>(_p: LifecyclePaths, work: () => Promise<T>): Promise<T> {
+  const release = await acquireWindowsMutex();
+  try { return await work(); } finally { await release(); }
+}
+async function configuredClient(p: LifecyclePaths): Promise<ManagedClient> {
+  return ManagedClient.fromConfig(undefined, p.root);
+}
+async function configuredValidation(p: LifecyclePaths): Promise<ConfigDiagnostic> {
+  return validateConfig(p.root);
 }
 
-async function installWindowsTask(paths: LifecyclePaths): Promise<void> {
-  if (platform() !== "win32") return;
-  const ownership = await taskOwnership(paths);
-  if (ownership === "foreign") throw new LifecycleError("task_owned_elsewhere", `scheduled task already exists and is not owned by this installation: ${paths.taskName}`);
-  await writeAtomic(paths.launcher, windowsLauncher(paths), 0o700);
-  const identity = await runHost("whoami.exe", ["/user"]);
-  const userSid = identity.stdout.match(/S-\d-\d+(?:-\d+)+/)?.[0];
-  if (!userSid) throw new LifecycleError("identity_invalid", "could not determine the current Windows user SID");
-  await writeAtomic(paths.taskXml, Buffer.from(`\uFEFF${taskXml(paths, userSid)}`, "utf16le"));
-  await runHost("schtasks.exe", ["/Create", "/TN", paths.taskName, "/XML", paths.taskXml, "/F"]);
-  await runHost("schtasks.exe", ["/Change", "/TN", paths.taskName, "/DISABLE"]);
+export function boundedStartupLogCause(contents: string): string | undefined {
+  const exitAtom = Array.from(contents.matchAll(/\*\* \(EXIT\) :([a-z][a-z0-9_]{1,80})/g)).at(-1)?.[1];
+  if (exitAtom) return exitAtom;
+  const missing = Array.from(contents.matchAll(/\b(missing_[a-z][a-z0-9_]{1,80})\b/g)).at(-1)?.[1];
+  return missing;
 }
 
-async function removeOwnedUnitLink(paths: LifecyclePaths): Promise<void> {
-  if (platform() !== "win32" && !process.env.CODEX_ORCHESTRATION_HOME) return;
-  const unit = servicePath(paths.unit);
-  const linkName = paths.serviceName;
-  const script = [
-    "set -eu",
-    `link=\"\${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/${linkName}\"`,
-    `unit=${quoteShell(unit)}`,
-    'if [ -L "$link" ]; then',
-    '  if target=$(readlink -- "$link"); then',
-    '    [ "$target" = "$unit" ] && rm -- "$link"',
-    "  fi",
-    "fi",
-    ""
-  ].join("\n");
-  await run("bash", ["-lc", script], true);
+export function freshStartupLogCause(contents: string, modifiedAt: number, launchAt: number): string | undefined {
+  if (!Number.isFinite(modifiedAt) || modifiedAt < launchAt) return undefined;
+  return boundedStartupLogCause(contents);
 }
 
-async function stageRelease(paths: LifecyclePaths, executable: string, version: string): Promise<void> {
-  const source = await validateExecutable(executable);
-  const targetRoot = join(paths.releasesRoot, version);
-  const target = join(targetRoot, "symphony");
+async function latestStartupLogCause(p: LifecyclePaths, launchAt: number): Promise<string | undefined> {
   try {
-    await stat(target);
-    throw new LifecycleError("release_exists", `release ${version} already exists`);
-  } catch (error) {
-    if (error instanceof LifecycleError) throw error;
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new LifecycleError("release_invalid", `could not inspect release ${version}`);
-  }
-  await ensureDirectory(targetRoot);
-  const temporary = `${target}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
-  await copyFile(source, temporary);
-  if (platform() !== "win32") await chmod(temporary, 0o755);
-  await rename(temporary, target);
-  const old = await readOptional(paths.currentRelease);
-  if (old) await writeAtomic(paths.previousRelease, `${old}\n`);
-  await writeAtomic(paths.currentRelease, `${servicePath(target)}\n`);
-}
-
-async function ensureConfigEnv(paths: LifecyclePaths): Promise<void> {
-  process.env.CODEX_ORCHESTRATION_CONFIG = paths.bridgeConfig;
-}
-
-async function serviceStatus(paths: LifecyclePaths, action: "is-active" | "is-enabled"): Promise<boolean> {
-  const result = await run("systemctl", ["--user", action, paths.serviceName], true);
-  return result.code === 0;
-}
-
-function requestId(operation: string): string {
-  return `cli-${operation}-${Date.now()}-${randomBytes(6).toString("hex")}`;
-}
-
-async function managedControl(paths: LifecyclePaths, operation: "pause" | "resume", disable: boolean): Promise<unknown> {
-  await ensureConfigEnv(paths);
-  const client = await ManagedClient.fromConfig();
-  let state: ManagedState | undefined;
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const directory = join(p.logs, "log");
+    const entries = (await readdir(directory, { withFileTypes: true })).filter((entry) => entry.isFile() && /^symphony\.log\.\d+$/.test(entry.name));
+    const files = await Promise.all(entries.map(async (entry) => {
+      const path = join(directory, entry.name);
+      return { path, modified: (await stat(path)).mtimeMs };
+    }));
+    const latest = files.sort((left, right) => right.modified - left.modified)[0];
+    if (!latest || latest.modified < launchAt) return undefined;
+    const details = await stat(latest.path);
+    const length = Math.min(details.size, 16 * 1024);
+    const handle = await open(latest.path, "r");
     try {
-      state = await client.state();
-      break;
-    } catch (error) {
-      if (!(error instanceof BridgeError) || error.code !== "upstream_unreachable" || attempt === 49) throw error;
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+      const buffer = Buffer.alloc(length);
+      await handle.read(buffer, 0, length, Math.max(0, details.size - length));
+      return freshStartupLogCause(buffer.toString("utf8"), details.mtimeMs, launchAt);
+    } finally { await handle.close(); }
+  } catch { return undefined; }
+}
+
+async function terminalStartupFailure(p: LifecyclePaths, launchAt: number): Promise<string | undefined> {
+  try {
+    const task = await taskDiagnostics(p);
+    const lastRun = task.lastRunTime ? Date.parse(task.lastRunTime) : Number.NaN;
+    if (task.active || !Number.isFinite(lastRun) || lastRun < launchAt - 2_000) return undefined;
+    const cause = await latestStartupLogCause(p, launchAt);
+    const result = task.lastTaskResult ?? "unknown";
+    return "scheduled task exited during startup with result " + result + (cause ? ": " + cause : "");
+  } catch { return undefined; }
+}
+
+async function waitUntilReady(p: LifecyclePaths, lifecycleDeadline?: number, launchAt = Date.now()): Promise<void> {
+  const deadline = Math.min(Date.now() + READY_TIMEOUT_MS, lifecycleDeadline ?? Number.POSITIVE_INFINITY); let diagnostic = "task launch";
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const client = await Promise.race([
+        configuredClient(p),
+        new Promise<ManagedClient>((_, reject) => { timer = setTimeout(() => reject(new LifecycleError("readiness_timeout", "readiness probe exceeded the 60-second deadline")), remaining); })
+      ]);
+      const probeRemaining = deadline - Date.now();
+      if (probeRemaining <= 0) break;
+      await client.state({}, probeRemaining); return;
     }
+    catch (cause) {
+      diagnostic = cause instanceof Error ? cause.message : "loopback probe failed";
+      const terminal = await terminalStartupFailure(p, launchAt);
+      if (terminal) throw new LifecycleError("startup_task_failed", terminal);
+      const pause = Math.min(500, Math.max(0, deadline - Date.now()));
+      if (pause > 0) await new Promise((done) => setTimeout(done, pause));
+    }
+    finally { if (timer) clearTimeout(timer); }
   }
-  if (!state || !Number.isInteger(state.revision)) throw new LifecycleError("state_invalid", "managed state did not include a current revision");
-  return client.control({ request_id: requestId(operation), operation, args: { scope: "service", expected_revision: state.revision, disable } });
+  throw new LifecycleError("readiness_timeout", "Symphony did not become ready within 60 seconds after task launch: " + diagnostic);
 }
 
-async function setupWindows(options: LifecycleOptions): Promise<LifecyclePaths> {
-  const linuxPaths = await runWslCli("setup", options) as LifecyclePaths;
-  const paths = windowsKeeperPaths(linuxPaths);
-  await applyStoredTaskName(paths);
-  const ownership = await taskOwnership(paths);
-  if (ownership === "foreign") throw new LifecycleError("task_owned_elsewhere", `scheduled task already exists and is not owned by this installation: ${paths.taskName}`);
-  await installWindowsTask(paths);
-  await writeAtomic(paths.metadata, `${JSON.stringify({ serviceName: paths.serviceName, taskName: paths.taskName, installedAt: new Date().toISOString() }, null, 2)}\n`);
-  return paths;
+async function setupUnlocked(p: LifecyclePaths, options: LifecycleOptions): Promise<LifecyclePaths> {
+  const existingTask = await taskSnapshot(p);
+  if (existingTask.exists && !(await taskOwned(p))) throw new LifecycleError("task_owned_elsewhere", "scheduled task already exists and is not owned by this installation");
+  if (existingTask.active) await stopOwnedTask(p);
+  for (const directory of [p.root, p.releases, p.config, p.state, p.logs, p.workspaces]) await privateDirectory(directory);
+  await writeControllerEnvironment(p);
+  const port = await writeConfiguration(p, options);
+  const existingWorkflow = await optional(p.workflow);
+  const workflowState = existingWorkflow === undefined ? { hasLauncher: false, hasLegacy: false } : workflowStatus(existingWorkflow);
+  const workflowNeedsConfiguration = Boolean(options.workflow || options.launcher || existingWorkflow === undefined || !workflowState.hasLauncher || workflowState.hasLegacy);
+  if (workflowNeedsConfiguration) {
+    await stageWorkflow(p, options.workflow, await resolveCodexLauncher(options.launcher));
+  }
+  if (options.executable || options.releaseManifest) await stageRelease(p, options, releaseVersion(options.version));
+  if (!(await optional(p.current))) throw new LifecycleError("release_missing", "provide --executable for the first install");
+  await installTask(p, port);
+  await atomic(p.metadata, JSON.stringify({ taskName: p.taskName, root: p.root, installedAt: new Date().toISOString() }, null, 2) + "\n");
+  return p;
 }
-
 export async function setup(options: LifecycleOptions = {}): Promise<LifecyclePaths> {
-  applyOptions(options);
-  if (platform() === "win32") return setupWindows(options);
-  const paths = lifecyclePaths(process.env, platform());
-  for (const path of [paths.configRoot, paths.dataRoot, paths.stateRoot, paths.releasesRoot, paths.logsRoot, paths.journalRoot, paths.workspacesRoot, dirname(paths.unit), dirname(paths.wrapper)]) await ensureDirectory(path);
-  const workflow = await readWorkflow(paths, options);
-  await writeToken(paths, options.tokenFile);
-  await writeBridgeConfig(paths, options);
-  if (options.executable) await stageRelease(paths, options.executable, validateVersion(options.version));
-  if (!(await readOptional(paths.currentRelease))) throw new LifecycleError("release_missing", "provide --executable to install the first managed release");
-  await stageCheckoutHelper(paths);
-  await writeAtomic(paths.workflow, rewriteCheckoutHelperPath(workflow, paths.helper));
-  await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile(paths.bridgeConfig, "utf8")).port)), 0o700);
-  if (platform() === "win32") {
-    const metadata = await readMetadata(paths);
-    if (metadata.serviceName === paths.serviceName && metadata.taskName) paths.taskName = metadata.taskName;
-    const ownership = await taskOwnership(paths);
-    if (ownership === "foreign") throw new LifecycleError("task_owned_elsewhere", `scheduled task already exists and is not owned by this installation: ${paths.taskName}`);
-  }
-  await installUnit(paths);
-  if (platform() === "win32") {
-    await installWindowsTask(paths);
-  }
-  await writeAtomic(paths.metadata, `${JSON.stringify({ serviceName: paths.serviceName, taskName: paths.taskName, installedAt: new Date().toISOString() }, null, 2)}\n`);
-  return paths;
+  const p = paths(options); return withMutex(p, () => setupUnlocked(p, options));
 }
-
-export async function validateConfigForHost(): Promise<ConfigDiagnostic> {
-  if (platform() === "win32") return await runWslCli("validate-config") as ConfigDiagnostic;
-  return validateConfig();
-}
-
 export async function diagnostics(options: LifecycleOptions = {}): Promise<Record<string, unknown>> {
-  applyOptions(options);
-  if (platform() === "win32") return await runWslCli("diagnostics", options) as Record<string, unknown>;
-  const paths = lifecyclePaths(process.env, platform());
-  await applyStoredTaskName(paths);
-  await ensureConfigEnv(paths);
-  const config = await import("./config.js").then(({ validateConfig }) => validateConfig());
-  return {
-    valid: config.valid,
-    config,
-    service: { name: paths.serviceName, active: await serviceStatus(paths, "is-active"), enabled: await serviceStatus(paths, "is-enabled") },
-    paths: { config: paths.bridgeConfig, workflow: paths.workflow, helper: paths.helper, data: paths.dataRoot, state: paths.stateRoot, journal: paths.journalRoot, workspaces: paths.workspacesRoot, lock: paths.lock, unit: paths.unit },
-    release: await readOptional(paths.currentRelease),
-    previousRelease: await readOptional(paths.previousRelease),
-    task: platform() === "win32" ? paths.taskName : undefined
+  const p = paths(options); const config = await configuredValidation(p); const selected = await optional(p.current); const previous = await optional(p.previous);
+  let nativeTask: NativeTaskDiagnostic;
+  let inspectionError: string | undefined;
+  try { nativeTask = await taskDiagnostics(p); } catch (error) {
+    nativeTask = { exists: false, running: false, active: false };
+    inspectionError = error instanceof LifecycleError ? error.message : "could not inspect the orchestration scheduled task";
+  }
+  let owned = !nativeTask.exists;
+  if (nativeTask.exists) {
+    try { owned = await taskOwned(p); } catch { owned = false; }
+  }
+  const release = await releaseEntryDiagnostics(p, selected);
+  const task = {
+    name: p.taskName,
+    exists: nativeTask.exists,
+    state: nativeTask.state ?? null,
+    running: nativeTask.running,
+    active: nativeTask.active,
+    owned,
+    lastTaskResult: nativeTask.lastTaskResult ?? null,
+    lastRunTime: nativeTask.lastRunTime ?? null,
+    nextRunTime: nativeTask.nextRunTime ?? null,
+    action: nativeTask.action ?? null,
+    inspectionError: inspectionError ?? null
   };
+  const startup = {
+    configValid: config.valid,
+    taskExists: nativeTask.exists,
+    taskOwned: owned,
+    taskState: nativeTask.state ?? null,
+    lastTaskResult: nativeTask.lastTaskResult ?? null,
+    lastRunTime: nativeTask.lastRunTime ?? null,
+    selectedRelease: release,
+    action: nativeTask.action ?? { command: "powershell.exe", arguments: "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + p.runner + "\"", hidden: true },
+    issue: inspectionError || !config.valid ? (inspectionError || config.error || "configuration is invalid") : !nativeTask.exists ? "scheduled task is not installed" : !owned ? "scheduled task is not owned by this installation" : !release.valid ? String(release.error) : undefined
+  };
+  return { valid: config.valid && !inspectionError && nativeTask.exists && owned && release.valid, config, task, startup, paths: p, release: selected, previousRelease: previous };
 }
-
 export async function start(options: LifecycleOptions = {}): Promise<LifecyclePaths> {
-  applyOptions(options);
-  if (platform() === "win32") {
-    const paths = await setupWindows(options);
-    await run("systemctl", ["--user", "enable", "--now", paths.serviceName]);
-    await writeLinuxMarker(paths.enabledMarker);
-    await runHost("schtasks.exe", ["/Change", "/TN", paths.taskName, "/ENABLE"]);
-    await runHost("schtasks.exe", ["/Run", "/TN", paths.taskName]);
-    await runWslCli("resume", options);
-    return paths;
-  }
-  const paths = await setup(options);
-  await run("systemctl", ["--user", "enable", "--now", paths.serviceName]);
-  if (platform() === "win32") {
-    await writeAtomic(paths.enabledMarker, "enabled\n");
-    await runHost("schtasks.exe", ["/Change", "/TN", paths.taskName, "/ENABLE"]);
-    await runHost("schtasks.exe", ["/Run", "/TN", paths.taskName]);
-  }
-  await managedControl(paths, "resume", false);
-  return paths;
+  const p = paths(options); return withMutex(p, async () => {
+    const current = await optional(p.current); const task = await taskSnapshot(p);
+    if (task.exists && !(await taskOwned(p))) throw new LifecycleError("task_owned_elsewhere", "scheduled task already exists and is not owned by this installation");
+    const needsSetup = Boolean(options.executable || options.releaseManifest || options.workflow || options.port !== undefined || options.tokenFile || options.launcher || !current || !task.exists);
+    if (needsSetup) await setupUnlocked(p, options);
+    else {
+      const config = await configuredValidation(p);
+      if (!config.valid) throw new LifecycleError("config_invalid", config.error || "bridge config is invalid");
+    }
+    const launchAt = Date.now(); await run("schtasks.exe", ["/Run", "/TN", p.taskName]); await waitUntilReady(p, options.deadlineAt, launchAt); return p;
+  });
 }
-
-export async function pause(options: LifecycleOptions = {}): Promise<unknown> {
-  applyOptions(options);
-  if (platform() === "win32") return runWslCli("pause", options);
-  const paths = lifecyclePaths(process.env, platform());
-  await applyStoredTaskName(paths);
-  return managedControl(paths, "pause", false);
+async function serviceControl(options: LifecycleOptions, operation: "pause" | "resume", disable: boolean): Promise<unknown> {
+  const p = paths(options); let state: ManagedState; const client = await configuredClient(p);
+  try { state = await client.state(); } catch (cause) { if (cause instanceof BridgeError) throw new LifecycleError(cause.code, cause.message); throw cause; }
+  if (!Number.isInteger(state.revision)) throw new LifecycleError("state_invalid", "managed state did not include a current revision");
+  return client.control({ request_id: "cli-" + operation + "-" + Date.now() + "-" + randomBytes(6).toString("hex"), operation, args: { scope: "service", expected_revision: state.revision, disable } });
 }
-
-export async function resume(options: LifecycleOptions = {}): Promise<unknown> {
-  applyOptions(options);
-  if (platform() === "win32") return runWslCli("resume", options);
-  const paths = lifecyclePaths(process.env, platform());
-  await applyStoredTaskName(paths);
-  return managedControl(paths, "resume", false);
-}
-
+export async function pause(options: LifecycleOptions = {}): Promise<unknown> { const p = paths(options); return withMutex(p, () => serviceControl(options, "pause", false)); }
+export async function resume(options: LifecycleOptions = {}): Promise<unknown> { const p = paths(options); return withMutex(p, () => serviceControl(options, "resume", false)); }
 export async function stop(options: LifecycleOptions = {}): Promise<LifecyclePaths> {
-  applyOptions(options);
-  if (platform() === "win32") {
-    const probe = windowsKeeperPaths(lifecyclePaths(process.env, platform()));
-    await applyStoredTaskName(probe);
-    const result = await runWslCli("stop", options) as LifecyclePaths;
-    await removeLinuxMarker(result.enabledMarker);
-    const paths = windowsKeeperPaths(result);
-    paths.taskName = probe.taskName;
-    await runHost("schtasks.exe", ["/Change", "/TN", paths.taskName, "/DISABLE"], true);
-    return paths;
-  }
-  const paths = lifecyclePaths(process.env, platform());
-  await applyStoredTaskName(paths);
-  await managedControl(paths, "pause", true);
-  if (platform() === "win32") await rm(paths.enabledMarker, { force: true });
-  await run("systemctl", ["--user", "disable", "--now", paths.serviceName]);
-  if (platform() === "win32") await runHost("schtasks.exe", ["/Change", "/TN", paths.taskName, "/DISABLE"]);
-  return paths;
+  const p = paths(options); return withMutex(p, async () => {
+    if (!(await taskOwned(p))) throw new LifecycleError("task_owned_elsewhere", "scheduled task exists and is not owned by this installation");
+    let serviceError: unknown;
+    let taskError: unknown;
+    try { await serviceControl(options, "pause", true); } catch (error) { serviceError = error; }
+    try { await stopTask(p); } catch (error) { taskError = error; }
+    if (serviceError && taskError) {
+      const describe = (error: unknown, fallback: string): string => {
+        if (error instanceof LifecycleError) return error.code + ": " + error.message;
+        if (error instanceof Error) return error.message;
+        return fallback;
+      };
+      const serviceMessage = describe(serviceError, "service control failed");
+      const taskMessage = describe(taskError, "scheduled task stop failed");
+      throw new LifecycleError("stop_failed", serviceMessage + "; " + taskMessage);
+    }
+    if (serviceError) throw serviceError;
+    if (taskError) throw taskError;
+    return p;
+  });
 }
-
 export async function upgrade(options: LifecycleOptions): Promise<LifecyclePaths> {
-  if (!options.executable) throw new LifecycleError("executable_required", "upgrade requires --executable");
-  applyOptions(options);
-  if (platform() === "win32") return await runWslCli("upgrade", options) as LifecyclePaths;
-  const paths = lifecyclePaths(process.env, platform());
-  await applyStoredTaskName(paths);
-  const version = validateVersion(options.version);
-  await stageRelease(paths, options.executable, version);
-  await stageCheckoutHelper(paths);
-  await writeAtomic(paths.workflow, rewriteCheckoutHelperPath(await readWorkflow(paths, {}), paths.helper));
-  await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile(paths.bridgeConfig, "utf8")).port)), 0o700);
-  await installUnit(paths);
-  if (await serviceStatus(paths, "is-active")) await run("systemctl", ["--user", "restart", paths.serviceName]);
-  return paths;
+  if (!options.executable && !options.releaseManifest) throw new LifecycleError("release_source_required", "upgrade requires --release-manifest or an offline --executable ZIP with --sha256");
+  const p = paths(options); return withMutex(p, async () => {
+    if (!(await taskOwned(p))) throw new LifecycleError("task_owned_elsewhere", "scheduled task exists and is not owned by this installation");
+    const active = await taskRunning(p); await stopOwnedTask(p); await stageRelease(p, options, releaseVersion(options.version));
+    const config = await configuredValidation(p); if (!config.valid || !config.port) throw new LifecycleError("config_invalid", config.error || "bridge config is invalid");
+    await installTask(p, config.port); if (active) { const launchAt = Date.now(); await run("schtasks.exe", ["/Run", "/TN", p.taskName]); await waitUntilReady(p, options.deadlineAt, launchAt); } return p;
+  });
 }
-
 export async function rollback(options: LifecycleOptions = {}): Promise<LifecyclePaths> {
-  applyOptions(options);
-  if (platform() === "win32") return await runWslCli("rollback", options) as LifecyclePaths;
-  const paths = lifecyclePaths(process.env, platform());
-  await applyStoredTaskName(paths);
-  const previous = await readOptional(paths.previousRelease);
-  const current = await readOptional(paths.currentRelease);
-  if (!previous || !current) throw new LifecycleError("rollback_unavailable", "no previous release is available for rollback");
-  await writeAtomic(paths.currentRelease, `${previous}\n`);
-  await writeAtomic(paths.previousRelease, `${current}\n`);
-  await writeAtomic(paths.wrapper, serviceInvocation(paths, Number(JSON.parse(await readFile(paths.bridgeConfig, "utf8")).port)), 0o700);
-  await installUnit(paths);
-  if (await serviceStatus(paths, "is-active")) await run("systemctl", ["--user", "restart", paths.serviceName]);
-  return paths;
+  const p = paths(options); return withMutex(p, async () => {
+    if (!(await taskOwned(p))) throw new LifecycleError("task_owned_elsewhere", "scheduled task exists and is not owned by this installation");
+    const previous = await optional(p.previous); const current = await optional(p.current);
+    if (!previous || !current) throw new LifecycleError("rollback_unavailable", "no previous release is available for rollback");
+    const active = await taskRunning(p); await stopOwnedTask(p); await atomic(p.current, previous + "\n"); await atomic(p.previous, current + "\n");
+    const config = await configuredValidation(p); if (!config.valid || !config.port) throw new LifecycleError("config_invalid", config.error || "bridge config is invalid");
+    await installTask(p, config.port); if (active) { const launchAt = Date.now(); await run("schtasks.exe", ["/Run", "/TN", p.taskName]); await waitUntilReady(p, options.deadlineAt, launchAt); } return p;
+  });
 }
-
 export async function uninstall(options: LifecycleOptions = {}): Promise<LifecyclePaths> {
-  applyOptions(options);
-  if (platform() === "win32") {
-    const probe = windowsKeeperPaths(lifecyclePaths(process.env, platform()));
-    await applyStoredTaskName(probe);
-    const task = await taskOwnership(probe);
-    if (task === "foreign") throw new LifecycleError("task_owned_elsewhere", `scheduled task already exists and is not owned by this installation: ${probe.taskName}`);
-    const result = await runWslCli("uninstall", options) as LifecyclePaths;
-    await removeLinuxMarker(result.enabledMarker);
-    if (task === "owned") await runHost("schtasks.exe", ["/Delete", "/TN", probe.taskName, "/F"], true);
-    for (const path of [probe.launcher, probe.taskXml, probe.metadata]) await rm(path, { force: true });
-    return { ...result, launcher: probe.launcher, taskXml: probe.taskXml, metadata: probe.metadata, taskName: probe.taskName };
-  }
-  const paths = lifecyclePaths(process.env, platform());
-  await applyStoredTaskName(paths);
-  const unit = await unitOwnership(paths);
-  const task = await taskOwnership(paths);
-  if (unit === "foreign") throw new LifecycleError("unit_owned_elsewhere", `service unit exists and is not owned by this installation: ${paths.unit}`);
-  if (task === "foreign") throw new LifecycleError("task_owned_elsewhere", `scheduled task exists and is not owned by this installation: ${paths.taskName}`);
-  const owned = unit === "owned" || task === "owned";
-  if (unit === "owned") {
-    if (await serviceStatus(paths, "is-active")) await stop(options);
-    await run("systemctl", ["--user", "disable", "--now", paths.serviceName], true);
-    await removeOwnedUnitLink(paths);
-  }
-  if (task === "owned") {
-    await rm(paths.enabledMarker, { force: true });
-    await runHost("schtasks.exe", ["/Delete", "/TN", paths.taskName, "/F"], true);
-  }
-  if (owned) {
-    for (const path of [paths.unit, paths.wrapper, paths.launcher, paths.taskXml, paths.metadata]) await rm(path, { force: true });
-    await run("systemctl", ["--user", "daemon-reload"], true);
-  }
-  return paths;
+  const p = paths(options); return withMutex(p, async () => { if (!(await taskOwned(p))) throw new LifecycleError("task_owned_elsewhere", "scheduled task exists and is not owned by this installation"); await stopOwnedTask(p); if (await taskExists(p)) await run("schtasks.exe", ["/Delete", "/TN", p.taskName, "/F"]); await rm(p.launcher, { force: true }); await rm(p.runner, { force: true }); await rm(p.taskXml, { force: true }); await rm(p.metadata, { force: true }); return p; });
 }
+export async function validateConfigForHost(testRoot?: string): Promise<ConfigDiagnostic> { return validateConfig(testRoot); }
