@@ -11,6 +11,10 @@ managed-worker routing and routine acceptance, integration, and release. Astra
 does not proxy Sol controls and no caller-supplied task or identity field is
 authority.
 
+Until the installed Codex build is verified to fix `openai/codex#36645`, keep
+in-app Browser work in the root task and follow the bundled
+[Browser precautions](references/browser-workaround.md).
+
 At the start of a delivery, identify the smallest real integration path,
 interfaces, runtime user, and permissions. If the Project binding is missing,
 use the supported setup/operator binding flow and confirm canonical state before
