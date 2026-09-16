@@ -47,26 +47,42 @@ async function run(command: string, args: string[], allowFailure = false): Promi
     throw new LifecycleError("command_failed", command + " " + args.join(" ") + " failed" + (output ? ": " + output : ""), value.code);
   }
 }
-async function privateDirectory(path: string): Promise<void> {
+export async function privateDirectory(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
   if (process.platform !== "win32") return;
   const sid = await currentSid();
   const aclOk = (result: { code: number; stdout: string; stderr: string }): boolean => result.code === 0 && !/Failed processing\s+[1-9]/i.test(result.stdout + result.stderr);
-  // Reset inherited and stale explicit ACEs before granting only this user's SID.
-  const reset = await run("icacls.exe", [path, "/reset", "/t", "/c"], true);
+  // Recover owner-correct children whose DACL was emptied by an interrupted
+  // removal before replacing the root DACL or asking icacls to reset them.
+  const rootBootstrap = await run("icacls.exe", [path, "/grant:r", "*" + sid + ":(OI)(CI)F"], true);
+  if (!aclOk(rootBootstrap)) throw new LifecycleError("acl_failed", "could not bootstrap private orchestration root ACLs");
+  const treeBootstrap = await run("icacls.exe", [path, "/grant:r", "*" + sid + ":F", "/t", "/c"], true);
+  if (!aclOk(treeBootstrap)) throw new LifecycleError("acl_failed", "could not bootstrap private orchestration tree ACLs");
+  // Set the root DACL directly because resetting it against a protected parent
+  // can remove the caller's only ACE. Child resets then inherit this one
+  // known-good ACE.
+  const rootAclScript = [
+    "$sid = New-Object Security.Principal.SecurityIdentifier(" + psQuote(sid) + ")",
+    "$acl = New-Object Security.AccessControl.DirectorySecurity",
+    "$acl.SetOwner($sid)",
+    "$acl.SetAccessRuleProtection($true, $false)",
+    "$flags = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit",
+    "$rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::FullControl, $flags, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)",
+    "$acl.AddAccessRule($rule)",
+    "[IO.Directory]::SetAccessControl(" + psQuote(path) + ", $acl)"
+  ].join("; ");
+  const rootAcl = await run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", rootAclScript], true);
+  if (rootAcl.code !== 0) throw new LifecycleError("acl_failed", "could not protect the private orchestration root ACL");
+  // Reset only descendants. Resetting the root would derive its DACL from its
+  // deliberately protected parent and can remove the caller's only ACE.
+  const reset = await run("icacls.exe", [join(path, "*"), "/reset", "/t", "/c"], true);
   if (!aclOk(reset)) throw new LifecycleError("acl_failed", "could not reset orchestration state ACLs");
-  // Grant first so removing inherited ACEs cannot strand child objects before
-  // the current SID has access to them.
-  const bootstrap = await run("icacls.exe", [path, "/grant:r", "*" + sid + ":F", "/t", "/c"], true);
-  if (!aclOk(bootstrap)) throw new LifecycleError("acl_failed", "could not bootstrap private orchestration ACLs");
-  const inheritance = await run("icacls.exe", [path, "/inheritance:r", "/t", "/c"], true);
-  if (!aclOk(inheritance)) throw new LifecycleError("acl_failed", "could not remove inherited orchestration state ACLs");
-  // Grant the current SID on every existing object, then retain inheritance
-  // on the directory itself so future atomic files receive the same ACL.
+  // Reset can replace explicit child ACEs, so restore one before removing
+  // inheritance throughout the tree.
   const acl = await run("icacls.exe", [path, "/grant:r", "*" + sid + ":F", "/t", "/c"], true);
   if (!aclOk(acl)) throw new LifecycleError("acl_failed", "could not protect private orchestration state with the current user ACL");
-  const childAcl = await run("icacls.exe", [path, "/grant:r", "*" + sid + ":(OI)(CI)F"], true);
-  if (!aclOk(childAcl)) throw new LifecycleError("acl_failed", "could not configure private orchestration child ACL inheritance");
+  const inheritance = await run("icacls.exe", [path, "/inheritance:r", "/t", "/c"], true);
+  if (!aclOk(inheritance)) throw new LifecycleError("acl_failed", "could not remove inherited orchestration state ACLs");
   const owner = await run("icacls.exe", [path, "/setowner", "*" + sid, "/t", "/c"], true);
   if (!aclOk(owner)) throw new LifecycleError("acl_failed", "could not set the private orchestration state owner");
 }

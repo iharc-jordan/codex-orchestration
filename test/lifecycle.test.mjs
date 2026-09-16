@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import { promisify } from "node:util";
 import { orchestrationPaths } from "../dist/paths.js";
-import { boundedStartupLogCause, configuredWorkflow, freshStartupLogCause, resolveCodexLauncher, runnerContent, scheduledTaskXml, scrubControllerEnvironment, validateReleaseManifest, workerCommand } from "../dist/lifecycle.js";
+import { boundedStartupLogCause, configuredWorkflow, freshStartupLogCause, privateDirectory, resolveCodexLauncher, runnerContent, scheduledTaskXml, scrubControllerEnvironment, validateReleaseManifest, workerCommand } from "../dist/lifecycle.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -22,6 +22,27 @@ test("one path resolver keeps private Windows state below CodexOrchestration", (
   assert.equal(paths.root, "C:\\Users\\Test\\AppData\\Local\\CodexOrchestration");
   for (const path of [paths.releases, paths.config, paths.state, paths.logs, paths.workspaces, paths.current, paths.previous, paths.bridgeConfig, paths.controllerEnvironment]) assert.ok(path.startsWith(paths.root + "\\"));
   assert.doesNotMatch(JSON.stringify(paths), /wsl|systemd|linux/i);
+});
+
+test("private directory hardening recovers an owner-correct child with an empty ACL", async (t) => {
+  if (process.platform !== "win32") { t.skip("native Windows ACL recovery"); return; }
+  const root = await mkdtemp(join(tmpdir(), "codex-orchestration-acl-"));
+  const child = join(root, "interrupted-release");
+  await mkdir(join(child, "nested"), { recursive: true });
+  const identity = await execFile("whoami.exe", ["/user"], { windowsHide: true });
+  const sid = identity.stdout.match(/S-\d-\d+(?:-\d+)+/)?.[0];
+  assert.ok(sid, "current Windows SID must be available");
+  t.after(async () => {
+    await execFile("icacls.exe", [root, "/grant:r", "*" + sid + ":(OI)(CI)F"], { windowsHide: true }).catch(() => undefined);
+    await execFile("icacls.exe", [root, "/grant:r", "*" + sid + ":F", "/t", "/c"], { windowsHide: true }).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  });
+  await execFile("icacls.exe", [child, "/inheritance:r", "/grant:r", "*" + sid + ":F"], { windowsHide: true });
+  await execFile("icacls.exe", [child, "/remove:g", "*" + sid], { windowsHide: true });
+  await privateDirectory(root);
+  const listing = await execFile("icacls.exe", [root, "/t", "/c"], { windowsHide: true });
+  assert.doesNotMatch(listing.stdout + listing.stderr, /Failed processing\s+[1-9]/i);
+  assert.match(listing.stdout, /interrupted-release[\\/]nested/);
 });
 
 test("worker App Server command uses the public npm shim through cmd.exe", async (t) => {
