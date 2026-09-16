@@ -1,13 +1,20 @@
 # Codex Orchestration
 
-Codex Orchestration 0.3.0 is a Windows 11 x64 MCP bridge and lifecycle manager
-for one local Symphony managed control plane.
+Codex Orchestration 0.4.0 is a Windows 11 x64 MCP bridge and lifecycle manager
+for one local Symphony managed delivery control plane. Delegation is the
+default when it materially helps; small, tightly coupled work stays local.
 
 It publishes 13 MCP tools immediately, before reading configuration or
 contacting the runtime. Calls use one direct authenticated 127.0.0.1 client.
 Trusted MCP thread metadata derives the PM credential; caller request IDs and
 revision fences are forwarded exactly. A transmitted mutation is never replayed:
 an interrupted response is reported as mutation_outcome_uncertain.
+
+Managed state summaries expose additive worker activity, configured escalation
+reason, latest-report timestamp, and an explicit truncated marker for compact
+report summaries. Managed-worker usage reports input, cached-input, output, and
+total telemetry with completeness/accounting status; it excludes PM and Astra
+use and is not a billed-dollar total.
 
 The Windows lifecycle owns private data beneath
 %LOCALAPPDATA%\CodexOrchestration, one hidden least-privilege Scheduled Task,

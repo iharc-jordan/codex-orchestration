@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Install and operate the Windows-only Symphony 0.3.0 runtime packaged with Codex Orchestration.
+description: Install and operate the Windows-only Symphony 0.4.0 runtime packaged with Codex Orchestration.
 ---
 
 Use this skill for a first install or an intentional lifecycle change. This
@@ -23,12 +23,12 @@ binding values and provider settings:
     if (!(Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "obtain the published release-manifest.json for this package" }
     # Edit the copy: tracker.provider.owner/project_number and the provider
     # token reference must match the PM-owned project; keep managed paths.
-    node "$plugin\mcp\cli.mjs" setup --release-manifest $manifest --workflow $workflow --version 0.3.0
+    node "$plugin\mcp\cli.mjs" setup --release-manifest $manifest --workflow $workflow --version 0.4.0
 
 For an offline install, use an absolute ZIP path and the SHA-256 from that
 published manifest (or an independently verified release receipt):
 
-    node .\mcp\cli.mjs setup --executable C:\path\symphony-windows.zip --sha256 <64-hex-digest> --workflow C:\path\WORKFLOW.md --version 0.3.0
+    node .\mcp\cli.mjs setup --executable C:\path\symphony-windows.zip --sha256 <64-hex-digest> --workflow C:\path\WORKFLOW.md --version 0.4.0
 
 The ZIP is accepted only when it contains regular files
 `bin\symphony.bat` and `bin\symphony-worker-host.exe`. Setup stages an

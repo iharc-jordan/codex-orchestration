@@ -17382,7 +17382,7 @@ function errorResult(error2) {
 }
 async function runBridge(testRoot) {
   const server = new Server(
-    { name: "codex-orchestration", version: "0.3.0" },
+    { name: "codex-orchestration", version: "0.4.0" },
     { capabilities: { tools: {} } }
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));

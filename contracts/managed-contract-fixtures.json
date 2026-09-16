@@ -40,15 +40,27 @@
           "control_revision": 4,
           "principal": {"principal_id": "00000000-0000-4000-8000-000000000001"},
           "projects": {"PVT_one": {"project_id": "PVT_one", "project_number": 1, "repositories": ["acme/one"], "revision": 2}},
-          "usage": {"cumulative_tokens": 1200, "inflight_tokens": 0},
+          "usage": {
+            "input_tokens": 500,
+            "cached_input_tokens": 120,
+            "output_tokens": 700,
+            "total_tokens": 1200,
+            "cumulative_tokens": 1200,
+            "inflight_tokens": 0,
+            "telemetry_complete": true,
+            "runtime_complete": true,
+            "accounting_status": "known"
+          },
           "assignments": {
             "item-one": {
               "assignment_id": "item-one",
               "phase": "ready",
               "ownership": {"pm_id": "00000000-0000-4000-8000-000000000001", "status": "owned", "ownership_revision": 1},
-              "route": {"model": "gpt-5.6-luna", "effort": "xhigh"},
+              "route": {"model": "gpt-5.6-terra", "effort": "max", "escalation_reason": "Fixture requires connected-runtime review"},
               "wait_reason": null,
-              "last_report": {"report_id": "report-fixture-1", "attempt_id": "managed-item-one-attempt-1"}
+              "worker": {"active": true, "activity": "running verification"},
+              "usage": {"input_tokens": 500, "cached_input_tokens": 120, "output_tokens": 700, "total_tokens": 1200, "telemetry_complete": true, "runtime_complete": true, "accounting_status": "known"},
+              "last_report": {"report_id": "report-fixture-1", "attempt_id": "managed-item-one-attempt-1", "updated_at": "2026-09-16T16:00:00Z", "truncated": true}
             }
           }
         }

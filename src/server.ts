@@ -344,7 +344,7 @@ function errorResult(error: unknown) {
 
 export async function runBridge(testRoot?: string): Promise<void> {
   const server = new Server(
-    { name: "codex-orchestration", version: "0.3.0" },
+    { name: "codex-orchestration", version: "0.4.0" },
     { capabilities: { tools: {} } }
   );
 

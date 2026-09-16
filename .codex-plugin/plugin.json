@@ -1,7 +1,7 @@
 {
   "name": "codex-orchestration",
-  "version": "0.3.0",
-  "description": "A native Windows MCP bridge for the local Symphony managed control plane.",
+  "version": "0.4.0",
+  "description": "A native Windows MCP bridge for managed Symphony delivery routing and lifecycle control.",
   "author": {
     "name": "Codex Orchestration contributors"
   },
@@ -15,8 +15,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Orchestration",
-    "shortDescription": "Operate a local Symphony control plane.",
-    "longDescription": "Read managed state and submit explicit lifecycle operations through an authenticated loopback bridge.",
+    "shortDescription": "Route and operate managed Symphony delivery.",
+    "longDescription": "Read managed delivery state and submit explicit lifecycle operations through an authenticated loopback bridge with trusted PM identity.",
     "developerName": "Codex Orchestration contributors",
     "category": "Productivity",
     "capabilities": [
@@ -24,9 +24,9 @@
       "Write"
     ],
     "defaultPrompt": [
-      "Inspect the managed orchestration state.",
-      "Review recent orchestration events.",
-      "Prepare a managed lifecycle operation."
+      "Use managed delivery when delegation materially helps; keep small coupled work local.",
+      "Inspect canonical managed state before routing or controlling work.",
+      "Review bounded worker evidence before acceptance or integration."
     ]
   },
   "mcpServers": "./.mcp.json"

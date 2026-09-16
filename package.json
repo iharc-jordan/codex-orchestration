@@ -1,7 +1,7 @@
 {
   "name": "codex-orchestration",
-  "version": "0.3.0",
-  "description": "A native Windows MCP bridge for the local Symphony managed control plane.",
+  "version": "0.4.0",
+  "description": "A native Windows MCP bridge for managed Symphony delivery routing and lifecycle control.",
   "license": "Apache-2.0",
   "type": "module",
   "private": true,

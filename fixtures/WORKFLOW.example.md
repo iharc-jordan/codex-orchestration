@@ -27,6 +27,20 @@ managed:
   control_token_file: $SYMPHONY_CONTROL_TOKEN_FILE
 ---
 
+This disposable fixture uses the existing Symphony scheduler and managed
+journal. Before enrollment, the PM records the fixture owner, exact repository
+identities and starting commits, issue/schema baseline, runtime user, required
+tools and permissions, and the smallest real integration path and interfaces.
+Use supported setup to create or confirm the Project binding; do not add an
+inbox service, duplicate scheduler, endpoint, or dashboard refresh loop.
+
+Diagnose a failure before repeating an expensive rebuild. Preserve and reuse
+valid acceptance evidence when a revision does not affect it. Compact report
+summaries are suitable for routing only: when `last_report.truncated` is true,
+read the full assignment detail before relying on its evidence. Worker activity
+and managed-worker token telemetry are observational; neither is PM acceptance,
+full PM/Astra usage, or billed-dollar accounting.
+
 Complete the current PM-approved assignment in its provided checkout. Follow
 current acceptance conditions and reviewer feedback; they replace superseded
 requirements. Use the configured host tools to implement and verify the work.

@@ -11,13 +11,13 @@ the included workflow template, replacing its project-specific values, or
 provide another absolute workflow path:
 
     Copy-Item .\fixtures\WORKFLOW.example.md C:\Users\you\Downloads\WORKFLOW.md
-    node .\mcp\cli.mjs setup --release-manifest .\release-manifest.json --workflow C:\Users\you\Downloads\WORKFLOW.md --version 0.3.0
+    node .\mcp\cli.mjs setup --release-manifest .\release-manifest.json --workflow C:\Users\you\Downloads\WORKFLOW.md --version 0.4.0
     node .\mcp\cli.mjs start
     node .\mcp\cli.mjs diagnostics
     node .\mcp\cli.mjs pause
     node .\mcp\cli.mjs resume
     node .\mcp\cli.mjs stop
-    node .\mcp\cli.mjs upgrade --release-manifest .\release-manifest.json --version 0.3.0
+    node .\mcp\cli.mjs upgrade --release-manifest .\release-manifest.json --version 0.4.0
     node .\mcp\cli.mjs rollback
     node .\mcp\cli.mjs uninstall
 
@@ -43,11 +43,26 @@ are redacted.
 For an offline archive, use `--executable C:\path\release.zip` with
 `--sha256` followed by the same 64-character digest recorded in the published
 trusted release manifest. The manifest identifies iharc-jordan/symphony
-v0.3.0 and its pinned GitHub release URL; no source commit is embedded here.
+v0.4.0 and its release-owned runtime revision, download URL, and SHA-256. Do
+not hand-write or substitute a digest.
 
 The bridge publishes 13 tools immediately. Mutations preserve caller request
 IDs and revision/ownership fences, never retry after transmission, and return
 mutation_outcome_uncertain when delivery cannot be known.
+
+Use delegation when it materially helps the outcome. Keep small coupled work in
+the current task. The Sol delivery PM owns managed-worker routing and routine
+acceptance, integration, and release after confirming the trusted native PM
+tools. User steering travels through native task messaging to Sol and then the
+existing enroll, revise, pause, or cancel controls; cancellation is not
+acceptance and unaffected work and proof remain valid.
+
+Read compact state first. If a report summary is marked `truncated`, read the
+assignment's full detail before relying on its evidence. Managed-worker usage is
+telemetry only, distinguishes cached input from ordinary input, and must not be
+presented as full PM/Astra use or billed dollars. Do not add polling loops, an
+inbox service, or a duplicate scheduler. The dashboard remains the existing
+root-owned LiveView path with `?view=live&pm=<PM task identity>`.
 
 For worker App Server startup, the workflow contains only the validated
 absolute `codex.launcher` path. The runtime invokes the public npm shim

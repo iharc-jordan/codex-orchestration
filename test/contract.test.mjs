@@ -40,8 +40,24 @@ test("managed contract fixture covers the typed bridge envelope without private 
   assert.equal(http.state_views.summary.path, "/api/v1/managed/state?view=summary&project_id=PVT_one");
   assert.equal(http.state_views.detail.path, "/api/v1/managed/state?view=detail&project_id=PVT_one&assignment_id=item-one&include_history=true");
   assert.equal(http.state_views.full.path, "/api/v1/managed/state?view=full&include_history=true");
-  assert.deepEqual(http.state_views.summary.response.assignments["item-one"].last_report, { report_id: "report-fixture-1", attempt_id: "managed-item-one-attempt-1" });
-  assert.equal(http.state_views.summary.response.assignments["item-one"].ownership.ownership_revision, 1);
+  assert.equal(http.state_views.summary.response.usage.cached_input_tokens, 120);
+  assert.equal(http.state_views.summary.response.usage.telemetry_complete, true);
+  assert.equal(http.state_views.summary.response.usage.runtime_complete, true);
+  assert.equal(http.state_views.summary.response.usage.accounting_status, "known");
+  const summaryAssignment = http.state_views.summary.response.assignments["item-one"];
+  assert.deepEqual(summaryAssignment.last_report, {
+    report_id: "report-fixture-1",
+    attempt_id: "managed-item-one-attempt-1",
+    updated_at: "2026-09-16T16:00:00Z",
+    truncated: true
+  });
+  assert.equal(summaryAssignment.worker.activity, "running verification");
+  assert.equal(summaryAssignment.route.escalation_reason, "Fixture requires connected-runtime review");
+  assert.equal(summaryAssignment.usage.cached_input_tokens, 120);
+  assert.equal(summaryAssignment.usage.telemetry_complete, true);
+  assert.equal(summaryAssignment.usage.runtime_complete, true);
+  assert.equal(summaryAssignment.usage.accounting_status, "known");
+  assert.equal(summaryAssignment.ownership.ownership_revision, 1);
   assert.equal(http.state_views.detail.response.assignment.reports["report-fixture-1"].kind, "result");
   assert.equal(http.state_views.detail.response.project.project_id, "PVT_one");
   for (const operation of operations) {

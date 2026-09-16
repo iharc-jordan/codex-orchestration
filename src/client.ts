@@ -9,6 +9,18 @@ export type ManagedStateView = "summary" | "detail" | "full";
 export interface WorkerRoute {
   model: string;
   effort: string;
+  /** Set when the configured route is an explicit escalation from Luna/xhigh. */
+  escalation_reason?: string | null;
+  /** Indicates whether this route describes the live worker turn or configuration. */
+  source?: "running" | "configured" | string;
+}
+
+export interface ManagedWorker {
+  id?: string | null;
+  host?: string | null;
+  active?: boolean;
+  activity?: string | null;
+  [key: string]: unknown;
 }
 
 export interface ProjectBinding {
@@ -30,10 +42,13 @@ export interface ManagedAssignment {
   revision?: number;
   control_revision?: number;
   route?: WorkerRoute;
+  worker?: ManagedWorker | null;
+  escalation_reason?: string | null;
   ownership?: { pm_id?: string | null; status?: string; ownership_revision?: number; [key: string]: unknown } | null;
   wait_reason?: string | null;
   last_report?: ManagedReport | null;
   reports?: Record<string, ManagedReport>;
+  usage?: ManagedUsage;
   evidence?: string[];
   [key: string]: unknown;
 }
@@ -43,7 +58,18 @@ export interface ManagedReport {
   attempt_id?: string;
   kind?: string;
   summary?: string;
+  /** RFC 3339 timestamp for the report retained as the latest compact result. */
+  updated_at?: string | null;
+  /** Compact state summaries omit evidence and mark a clipped summary explicitly. */
+  truncated?: boolean;
   evidence?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface HistoricalRawTokens {
+  diagnostic?: "unavailable" | "unreliable" | string;
+  valid_spend?: boolean;
+  values?: Record<string, number>;
   [key: string]: unknown;
 }
 
@@ -53,15 +79,26 @@ export interface ManagedProjectState {
 }
 
 export interface ManagedUsage {
+  /** Aggregate managed-worker counters; they do not include PM or Astra usage. */
   input_tokens?: number;
-  cached_input_tokens?: number;
+  cached_input_tokens?: number | null;
   output_tokens?: number;
   total_tokens?: number;
   cumulative_tokens?: number;
   inflight_tokens?: number;
+  inflight_input_tokens?: number;
+  inflight_output_tokens?: number;
+  inflight_cached_input_tokens?: number | null;
   baseline_tokens?: number;
   overshoot_tokens?: number;
+  limit_tokens?: number;
+  seconds_running?: number;
   cap_reached?: boolean;
+  telemetry_complete?: boolean;
+  runtime_complete?: boolean;
+  accounting_status?: "known" | "unavailable" | "unreliable" | string;
+  diagnostic?: "unavailable" | "unreliable" | string;
+  historical_raw_tokens?: HistoricalRawTokens;
   [key: string]: unknown;
 }
 
