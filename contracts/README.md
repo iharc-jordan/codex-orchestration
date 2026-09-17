@@ -1,6 +1,6 @@
 # Managed control contract
 
-The fixtures define the 13 public MCP controls in version 0.4.0: diagnostics,
+The fixtures define the 13 managed MCP controls in version 0.5.0: diagnostics,
 state, events, and the ten PM mutation operations. The bridge preserves each
 request ID, operation body, and supplied revision or ownership fence.
 
@@ -20,3 +20,15 @@ same request ID before deciding what to do next.
 PM mutations require trusted _meta.threadId metadata. The bridge derives a
 per-thread capability from the local operator token and does not accept model
 supplied task, owner, or identity values as authority.
+
+Three additional local tools read, update and acknowledge project requirements,
+without contacting Symphony. They require an explicit repository cwd; updates
+and acknowledgements require trusted native task metadata. See
+[persistent requirements](../docs/requirements.md) for the file and hook contract.
+
+Operator project bindings include an absolute `requirements_path`. Enrollment
+and revision resolve `project_requirements_fingerprint` on the runtime; callers
+cannot replace the project source with an assignment-supplied path or text.
+This fingerprint is separate from `requirements_fingerprint` of the issue body.
+Dispatch, resume and acceptance check current project requirements before work
+can proceed. Stale requirements require assignment revision and reconciliation.

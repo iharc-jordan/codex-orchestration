@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { asBridgeError, BridgeError, ControlArgs, ControlOperation, ManagedClient, type ManagedStateArgs } from "./client.js";
 import { validateConfig } from "./config.js";
+import { readRequirements, updateRequirements } from "./requirements.js";
+import { acknowledgeRequirements } from "./requirements_session.js";
 
 const controlOperations: ControlOperation[] = ["register_pm", "claim", "enroll", "revise", "pause", "resume", "interrupt", "cancel", "review", "handoff"];
 const operatorOnlyOperations = new Set<ControlOperation>(["bind_project", "operator_takeover"]);
@@ -81,6 +83,7 @@ const operationArgSchemas: Record<ControlOperation, Record<string, unknown>> = {
           project_number: { type: "integer", minimum: 1 },
           status_field_id: { type: "string", minLength: 1 },
           projection_field_id: { type: "string", minLength: 1 },
+          requirements_path: { type: "string", minLength: 1, description: "Operator-configured absolute canonical REQUIREMENTS.md path, read by Symphony for every assignment." },
           status_options: { type: "object", minProperties: 1, additionalProperties: { type: "string", minLength: 1 } },
           repositories: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } }
         },
@@ -272,6 +275,45 @@ const tools = [
       additionalProperties: false
     }
   },
+  {
+    name: "orchestration_requirements_read",
+    description: "Read the canonical project REQUIREMENTS.md without contacting Symphony. The result includes the current content and fingerprint; linked worktrees resolve to the configured canonical root.",
+    inputSchema: {
+      type: "object",
+      properties: { cwd: { type: "string", minLength: 1, description: "Explicit repository or worktree path for the user's task." } },
+      required: ["cwd"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "orchestration_requirements_update",
+    description: "Atomically update canonical REQUIREMENTS.md using the fingerprint returned by requirements_read. Requires trusted native caller metadata. Record only explicit lasting user directions with scope, source, decision, and supersession when applicable; workers may read but must not invent requirements.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: { type: "string", minLength: 1, description: "Repository or worktree path." },
+        expected_fingerprint: { type: "string", pattern: "^sha256:[a-f0-9]{64}$", description: "Current fingerprint from requirements_read." },
+        content: { type: "string", minLength: 1, maxLength: 131072, description: "Complete validated REQUIREMENTS.md content." }
+      },
+      required: ["cwd", "expected_fingerprint", "content"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "orchestration_requirements_acknowledge",
+    description: "Record that the root task considered the current user turn for lasting requirements. Use updated after successful capture, or unchanged when current requirements already reflect the user's direction or no lasting change was given.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: { type: "string", minLength: 1 },
+        turn_id: { type: "string", minLength: 1 },
+        fingerprint: { type: "string", pattern: "^sha256:[a-f0-9]{64}$" },
+        outcome: { type: "string", enum: ["updated", "unchanged"] }
+      },
+      required: ["cwd", "turn_id", "fingerprint", "outcome"],
+      additionalProperties: false
+    }
+  },
   ...controlOperations.map((operation) => ({
     name: `orchestration_${operation}`,
     description: `Submit the ${operation} operation to Symphony using the trusted Codex thread identity in request metadata. Supply a caller-owned request_id and the operation-specific args; the bridge preserves both and never retries writes.`,
@@ -333,6 +375,13 @@ function requireNativePm(operation: ControlOperation, caller: NativeCaller | und
   return caller;
 }
 
+function requirementsCwd(args: unknown): string {
+  if (!isJsonObject(args)) throw new BridgeError("requirements_args_invalid", "requirements arguments must be an object");
+  const cwd = args.cwd;
+  if (typeof cwd !== "string" || !cwd.trim()) throw new BridgeError("requirements_cwd_invalid", "cwd must be a non-empty path");
+  return cwd;
+}
+
 function jsonResult(value: unknown) {
   return { content: [{ type: "text", text: JSON.stringify(value) }] };
 }
@@ -344,7 +393,7 @@ function errorResult(error: unknown) {
 
 export async function runBridge(testRoot?: string): Promise<void> {
   const server = new Server(
-    { name: "codex-orchestration", version: "0.4.0" },
+    { name: "codex-orchestration", version: "0.5.0" },
     { capabilities: { tools: {} } }
   );
 
@@ -354,6 +403,28 @@ export async function runBridge(testRoot?: string): Promise<void> {
       const name = request.params.name;
       const caller = nativeCaller(request as typeof request & { params: { _meta?: unknown } });
       if (name === "orchestration_diagnostics") return jsonResult(await validateConfig(testRoot));
+      if (name === "orchestration_requirements_read") {
+        const args = request.params.arguments ?? {};
+        return jsonResult(await readRequirements(requirementsCwd(args), { testRoot }));
+      }
+      if (name === "orchestration_requirements_update") {
+        if (!caller) throw new BridgeError("caller_identity_required", "requirements updates require Codex _meta.threadId");
+        const args = request.params.arguments ?? {};
+        const cwd = requirementsCwd(args);
+        if (!isJsonObject(args) || typeof args.expected_fingerprint !== "string" || typeof args.content !== "string") {
+          throw new BridgeError("requirements_args_invalid", "expected_fingerprint and content are required");
+        }
+        return jsonResult(await updateRequirements(cwd, { expected_fingerprint: args.expected_fingerprint, content: args.content }, { testRoot }));
+      }
+      if (name === "orchestration_requirements_acknowledge") {
+        if (!caller) throw new BridgeError("caller_identity_required", "requirements acknowledgement requires Codex _meta.threadId");
+        const args = request.params.arguments ?? {};
+        const cwd = requirementsCwd(args);
+        if (!isJsonObject(args) || typeof args.turn_id !== "string" || typeof args.fingerprint !== "string" || (args.outcome !== "updated" && args.outcome !== "unchanged")) {
+          throw new BridgeError("requirements_args_invalid", "cwd, turn_id, fingerprint, and outcome are required");
+        }
+        return jsonResult(await acknowledgeRequirements(caller.threadId, { cwd, turn_id: args.turn_id, fingerprint: args.fingerprint, outcome: args.outcome }, testRoot));
+      }
       if (name === "orchestration_state") {
         const client = await ManagedClient.fromConfig(caller?.threadId, testRoot);
         const args = request.params.arguments ?? {};

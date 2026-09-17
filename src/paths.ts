@@ -16,6 +16,8 @@ export interface OrchestrationPaths {
   /** Private provider environment captured for the controller process. */
   controllerEnvironment: string;
   bridgeConfig: string;
+  /** Private mapping from repository roots to canonical requirement roots. */
+  requirementsConfig: string;
   launcher: string;
   runner: string;
   taskXml: string;
@@ -40,6 +42,7 @@ export function orchestrationPaths(env: NodeJS.ProcessEnv = process.env, testRoo
     token: join(config, "token"),
     controllerEnvironment: join(config, "controller-env.json"),
     bridgeConfig: join(config, "config.json"),
+    requirementsConfig: join(config, "requirements.json"),
     launcher: join(root, "run-orchestration.cmd"),
     runner: join(root, "run-orchestration.ps1"),
     taskXml: join(root, "task.xml"),

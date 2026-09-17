@@ -1,6 +1,6 @@
 {
   "name": "codex-orchestration",
-  "version": "0.4.0",
+  "version": "0.5.0+codex.20260917184705",
   "description": "A native Windows MCP bridge for managed Symphony delivery routing and lifecycle control.",
   "author": {
     "name": "Codex Orchestration contributors"

@@ -10,6 +10,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 import { ManagedClient, derivePmCredential } from "../dist/client.js";
 import { validateConfig } from "../dist/config.js";
+import { writeRequirementSession } from "../dist/requirements_session.js";
 
 const execFile = promisify(execFileCallback);
 const mcpHarness = join(process.cwd(), "test", "fixtures", "mcp-server-harness.mjs");
@@ -77,7 +78,7 @@ function runProcess(command, args, options = {}) {
   });
 }
 
-test("native bridge registers all 13 tools before configuration or loopback contact", async (t) => {
+test("native bridge registers all 16 tools before configuration or loopback contact", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "codex-orchestration-native-"));
   const child = spawn(process.execPath, [mcpHarness, root], { cwd: process.cwd(), env: process.env, stdio: ["pipe", "pipe", "pipe"] });
   t.after(async () => { if (child.exitCode === null) child.kill(); await rm(root, { recursive: true, force: true }); });
@@ -85,9 +86,10 @@ test("native bridge registers all 13 tools before configuration or loopback cont
   await request(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "native-test", version: "1" } });
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }) + "\n");
   const tools = await request(2, "tools/list");
-  assert.equal(tools.result.tools.length, 13);
+  assert.equal(tools.result.tools.length, 16);
   assert.deepEqual(tools.result.tools.map((tool) => tool.name), [
     "orchestration_diagnostics", "orchestration_state", "orchestration_events",
+    "orchestration_requirements_read", "orchestration_requirements_update", "orchestration_requirements_acknowledge",
     "orchestration_register_pm", "orchestration_claim", "orchestration_enroll", "orchestration_revise",
     "orchestration_pause", "orchestration_resume", "orchestration_interrupt", "orchestration_cancel",
     "orchestration_review", "orchestration_handoff"
@@ -95,6 +97,47 @@ test("native bridge registers all 13 tools before configuration or loopback cont
   const diagnostic = await request(3, "tools/call", { name: "orchestration_diagnostics", arguments: {} });
   assert.equal(diagnostic.result.isError, undefined);
   assert.match(diagnostic.result.content[0].text, /config_missing/);
+});
+
+test("native MCP requirements tools work without Symphony and fence untrusted or stale writes", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "codex-orchestration-requirements-mcp-"));
+  const threadId = "018f4b48-8e5a-7f55-a2e8-0c1f5f9e6d72";
+  const child = spawn(process.execPath, [mcpHarness, root], { cwd: process.cwd(), env: process.env, stdio: ["pipe", "pipe", "pipe"] });
+  t.after(async () => { if (child.exitCode === null) { child.kill(); await once(child, "close"); } await rm(root, { recursive: true, force: true }); });
+  const request = readJsonLines(child);
+  await request(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "requirements-test", version: "1" } });
+  child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }) + "\n");
+  const initial = await request(2, "tools/call", { name: "orchestration_requirements_read", arguments: { cwd: root } });
+  const initialState = JSON.parse(initial.result.content[0].text);
+  assert.equal(initialState.exists, false);
+  const content = [
+    "# Requirements", "", "## No MFA for IHARC hosting",
+    "- Scope: IHARC hosting", "- Source: Jordan, 2026-09-16",
+    "- Decision: Do not enable or require MFA unless Jordan explicitly changes this direction.", ""
+  ].join("\n");
+  const untrusted = await request(3, "tools/call", { name: "orchestration_requirements_update", arguments: { cwd: root, expected_fingerprint: initialState.fingerprint, content } });
+  assert.equal(untrusted.result.isError, true);
+  assert.match(untrusted.result.content[0].text, /^caller_identity_required:/);
+  const metadata = { threadId, "x-codex-turn-metadata": { thread_id: threadId } };
+  const updated = await request(4, "tools/call", { name: "orchestration_requirements_update", _meta: metadata, arguments: { cwd: root, expected_fingerprint: initialState.fingerprint, content } });
+  assert.equal(updated.result.isError, undefined);
+  const updatedState = JSON.parse(updated.result.content[0].text);
+  const stale = await request(5, "tools/call", { name: "orchestration_requirements_update", _meta: metadata, arguments: { cwd: root, expected_fingerprint: initialState.fingerprint, content } });
+  assert.equal(stale.result.isError, true);
+  assert.match(stale.result.content[0].text, /^requirements_revision_conflict:/);
+  await writeRequirementSession(threadId, { cwd: root, fingerprint: updatedState.fingerprint, pendingTurn: "turn-42" }, root);
+  const acknowledgement = await request(6, "tools/call", { name: "orchestration_requirements_acknowledge", _meta: metadata, arguments: { cwd: root, turn_id: "turn-42", fingerprint: updatedState.fingerprint, outcome: "unchanged" } });
+  assert.equal(acknowledgement.result.isError, undefined);
+  assert.deepEqual(JSON.parse(acknowledgement.result.content[0].text), { acknowledged: true });
+  // A user-authorized multi-repository task can explicitly capture a decision
+  // in a second project; native identity and per-file CAS still apply.
+  const secondProject = join(root, "second-project");
+  await mkdir(secondProject);
+  const secondRead = await request(7, "tools/call", { name: "orchestration_requirements_read", arguments: { cwd: secondProject } });
+  const secondState = JSON.parse(secondRead.result.content[0].text);
+  const secondUpdate = await request(8, "tools/call", { name: "orchestration_requirements_update", _meta: metadata, arguments: { cwd: secondProject, expected_fingerprint: secondState.fingerprint, content } });
+  assert.equal(secondUpdate.result.isError, undefined);
+  assert.equal(JSON.parse(secondUpdate.result.content[0].text).content, content);
 });
 
 test("native bridge preserves request id and fences with the trusted thread credential", async (t) => {

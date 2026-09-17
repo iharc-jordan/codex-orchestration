@@ -1,0 +1,65 @@
+{
+  "description": "Load current project requirements and capture explicit user decisions across ordinary and managed tasks.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'mcp/requirements-hook.mjs')).href).then(m=>m.runHookCli())\"",
+            "timeout": 10,
+            "additionalContextLimit": 20000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'mcp/requirements-hook.mjs')).href).then(m=>m.runHookCli())\"",
+            "timeout": 10,
+            "additionalContextLimit": 20000
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'mcp/requirements-hook.mjs')).href).then(m=>m.runHookCli())\"",
+            "timeout": 10,
+            "additionalContextLimit": 20000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'mcp/requirements-hook.mjs')).href).then(m=>m.runHookCli())\"",
+            "timeout": 10,
+            "additionalContextLimit": 20000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'mcp/requirements-hook.mjs')).href).then(m=>m.runHookCli())\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

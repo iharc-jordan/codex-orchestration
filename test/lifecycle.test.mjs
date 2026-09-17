@@ -108,9 +108,9 @@ test("runner resolves private controller provider auth for the native controller
   const root = await mkdtemp(join(tmpdir(), "codex-orchestration-runner-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const paths = { ...orchestrationPaths({}, root), taskName: "CodexOrchestrationRunnerTest", workflow: join(root, "config", "WORKFLOW.md") };
-  const release = join(paths.releases, "0.4.0", "bin"); const output = join(root, "controller-env.txt");
+  const release = join(paths.releases, "0.5.0", "bin"); const output = join(root, "controller-env.txt");
   await mkdir(release, { recursive: true }); await mkdir(paths.config, { recursive: true });
-  await writeFile(paths.current, "0.4.0\n"); await writeFile(paths.token, "bridge-secret\n");
+  await writeFile(paths.current, "0.5.0\n"); await writeFile(paths.token, "bridge-secret\n");
   await writeFile(paths.bridgeConfig, JSON.stringify({ host: "127.0.0.1", port: 8787, token_file: paths.token }));
   await writeFile(paths.controllerEnvironment, JSON.stringify({ GITHUB_TOKEN: "private-controller-token" }));
   const helper = join(release, "symphony-worker-host.exe");
@@ -127,23 +127,20 @@ test("runner resolves private controller provider auth for the native controller
 });
 
 test("release manifests pin the approved GitHub release and a SHA-256", () => {
-  const manifest = { repository: "iharc-jordan/symphony", version: "0.4.0", runtimeDownloadUrl: "https://github.com/iharc-jordan/symphony/releases/download/v0.4.0/symphony-windows.zip", sha256: "a".repeat(64), distribution: "none", cookieFile: "absent" };
+  const manifest = { repository: "iharc-jordan/symphony", version: "0.5.0", runtimeDownloadUrl: "https://github.com/iharc-jordan/symphony/releases/download/v0.5.0/symphony-windows.zip", sha256: "a".repeat(64), distribution: "none", cookieFile: "absent" };
   assert.deepEqual(validateReleaseManifest(manifest), manifest);
   assert.throws(() => validateReleaseManifest({ ...manifest, runtimeDownloadUrl: "https://example.invalid/release.zip" }), /GitHub release/);
   assert.throws(() => validateReleaseManifest({ ...manifest, sha256: "not-a-digest" }), /SHA-256/);
   assert.throws(() => validateReleaseManifest({ ...manifest, distribution: "sname" }), /distribution/);
 });
 
-test("published plugin bundles the paired runtime manifest when the release owner has supplied it", async (t) => {
+test("published plugin bundles its exact paired runtime manifest", async () => {
   const manifest = JSON.parse(await readFile(new URL("../release-manifest.json", import.meta.url), "utf8"));
-  if (manifest.version !== "0.4.0") {
-    t.skip("the release owner supplies the paired 0.4.0 runtime manifest");
-    return;
-  }
+  const plugin = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   const validated = validateReleaseManifest(manifest);
   assert.equal(validated.repository, "iharc-jordan/symphony");
-  assert.equal(validated.version, "0.4.0");
-  assert.match(validated.runtimeDownloadUrl, /^https:\/\/github\.com\/iharc-jordan\/symphony\/releases\/download\/v0\.4\.0\//);
+  assert.equal(validated.version, plugin.version);
+  assert.ok(validated.runtimeDownloadUrl.startsWith(`https://github.com/iharc-jordan/symphony/releases/download/v${plugin.version}/`));
   assert.match(validated.sha256, /^[a-f0-9]{64}$/);
   assert.match(manifest.sourceCommit, /^[a-f0-9]{40}$/i);
 });

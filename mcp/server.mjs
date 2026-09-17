@@ -2983,7 +2983,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve5.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3010,7 +3010,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve4(root, ref) {
+    function resolve5(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3840,7 +3840,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve4(baseURI, relativeURI, options) {
+    function resolve5(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -3873,49 +3873,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative2, options, skipNormalization) {
+    function resolveComponent(base, relative3, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative2 = parse3(serialize(relative2, options), options);
+        relative3 = parse3(serialize(relative3, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative2.scheme) {
-        target.scheme = relative2.scheme;
-        target.userinfo = relative2.userinfo;
-        target.host = relative2.host;
-        target.port = relative2.port;
-        target.path = removeDotSegments(relative2.path || "");
-        target.query = relative2.query;
+      if (!options.tolerant && relative3.scheme) {
+        target.scheme = relative3.scheme;
+        target.userinfo = relative3.userinfo;
+        target.host = relative3.host;
+        target.port = relative3.port;
+        target.path = removeDotSegments(relative3.path || "");
+        target.query = relative3.query;
       } else {
-        if (relative2.userinfo !== void 0 || relative2.host !== void 0 || relative2.port !== void 0) {
-          target.userinfo = relative2.userinfo;
-          target.host = relative2.host;
-          target.port = relative2.port;
-          target.path = removeDotSegments(relative2.path || "");
-          target.query = relative2.query;
+        if (relative3.userinfo !== void 0 || relative3.host !== void 0 || relative3.port !== void 0) {
+          target.userinfo = relative3.userinfo;
+          target.host = relative3.host;
+          target.port = relative3.port;
+          target.path = removeDotSegments(relative3.path || "");
+          target.query = relative3.query;
         } else {
-          if (!relative2.path) {
+          if (!relative3.path) {
             target.path = base.path;
-            if (relative2.query !== void 0) {
-              target.query = relative2.query;
+            if (relative3.query !== void 0) {
+              target.query = relative3.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative2.path[0] === "/") {
-              target.path = removeDotSegments(relative2.path);
+            if (relative3.path[0] === "/") {
+              target.path = removeDotSegments(relative3.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative2.path;
+                target.path = "/" + relative3.path;
               } else if (!base.path) {
-                target.path = relative2.path;
+                target.path = relative3.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative2.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative3.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative2.query;
+            target.query = relative3.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3923,7 +3923,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative2.fragment;
+      target.fragment = relative3.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -4208,7 +4208,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve4,
+      resolve: resolve5,
       resolveComponent,
       equal,
       serialize,
@@ -15488,7 +15488,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+        await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -15505,7 +15505,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -15583,7 +15583,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve4(parseResult.data);
+            resolve5(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -15844,12 +15844,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve4, interval);
+      const timeoutId = setTimeout(resolve5, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -16725,19 +16725,19 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve4();
+        resolve5();
       } else {
-        this._stdout.once("drain", resolve4);
+        this._stdout.once("drain", resolve5);
       }
     });
   }
 };
 
 // src/server.ts
-import { resolve as resolve3 } from "node:path";
+import { resolve as resolve4 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/client.ts
@@ -16769,6 +16769,7 @@ function orchestrationPaths(env = process.env, testRoot) {
     token: join(config2, "token"),
     controllerEnvironment: join(config2, "controller-env.json"),
     bridgeConfig: join(config2, "config.json"),
+    requirementsConfig: join(config2, "requirements.json"),
     launcher: join(root, "run-orchestration.cmd"),
     runner: join(root, "run-orchestration.ps1"),
     taskXml: join(root, "task.xml"),
@@ -16883,6 +16884,256 @@ async function validateConfig(testRoot) {
     const safe = safeConfigError(error2);
     return { valid: false, configFile, error: `${safe.code}: ${safe.message}` };
   }
+}
+
+// src/requirements.ts
+import { createHash, randomBytes } from "node:crypto";
+import { execFile as execFileCallback2 } from "node:child_process";
+import { lstat as lstat2, mkdir, readFile as readFile2, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { dirname as dirname2, isAbsolute as isAbsolute3, join as join2, relative as relative2, resolve as resolve3, sep as sep2 } from "node:path";
+import { promisify as promisify2 } from "node:util";
+var execFile2 = promisify2(execFileCallback2);
+var REQUIREMENTS_FILE = "REQUIREMENTS.md";
+var MAX_REQUIREMENTS_BYTES = 128 * 1024;
+var RequirementsError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "RequirementsError";
+  }
+  code;
+};
+function fingerprint(content) {
+  return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
+}
+function samePath(left, right) {
+  const a = resolve3(left);
+  const b = resolve3(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+function inside(root, candidate) {
+  const outside = relative2(root, candidate);
+  return outside === "" || !isAbsolute3(outside) && outside !== ".." && !outside.startsWith(`..${sep2}`);
+}
+async function projectRoots(cwd) {
+  const requested = resolve3(cwd);
+  try {
+    if (!(await stat(requested)).isDirectory()) {
+      throw new RequirementsError("requirements_cwd_invalid", "cwd must identify a directory");
+    }
+  } catch (error2) {
+    if (error2 instanceof RequirementsError) throw error2;
+    throw new RequirementsError("requirements_cwd_unreadable", "cwd could not be inspected; check filesystem availability and permissions");
+  }
+  try {
+    const result = await execFile2("git", ["-C", requested, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], {
+      windowsHide: true,
+      maxBuffer: 64 * 1024,
+      env: { ...process.env, LC_ALL: "C", LANG: "C" }
+    });
+    const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length !== 2) throw new Error("unexpected git output");
+    const repositoryRoot = resolve3(lines[0]);
+    const commonDirectory = resolve3(lines[1]);
+    const roots = [repositoryRoot];
+    if (commonDirectory.endsWith(`${sep2}.git`)) roots.push(dirname2(commonDirectory));
+    return roots.filter((root, index) => roots.findIndex((other) => samePath(root, other)) === index);
+  } catch (error2) {
+    const details = error2;
+    if (details.code === "ENOENT") {
+      throw new RequirementsError("requirements_git_unavailable", "Git is required to resolve project requirements but is unavailable");
+    }
+    const stderr = String(details.stderr ?? "");
+    if (/not a git repository/i.test(stderr) && !await hasGitMetadata(requested)) {
+      return [requested];
+    }
+    throw new RequirementsError("requirements_repository_unreadable", "Git could not resolve this project; check repository and worktree availability before continuing");
+  }
+}
+async function hasGitMetadata(start) {
+  let current = start;
+  while (true) {
+    try {
+      await lstat2(join2(current, ".git"));
+      return true;
+    } catch (error2) {
+      if (error2.code !== "ENOENT") {
+        throw new RequirementsError("requirements_repository_unreadable", "Git metadata could not be inspected; check filesystem availability and permissions");
+      }
+    }
+    const parent = dirname2(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+}
+async function loadMapping(testRoot) {
+  const path = orchestrationPaths(process.env, testRoot).requirementsConfig;
+  let parsed;
+  try {
+    parsed = JSON.parse(await readFile2(path, "utf8"));
+  } catch (error2) {
+    if (error2.code === "ENOENT") return { version: 1, roots: {}, repositories: {} };
+    throw new RequirementsError("requirements_mapping_unreadable", "Requirements mapping could not be read; check filesystem availability and permissions");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new RequirementsError("requirements_mapping_invalid", "Requirements mapping must be a JSON object");
+  }
+  const candidate = parsed;
+  if (candidate.version !== 1 || !candidate.roots || typeof candidate.roots !== "object" || Array.isArray(candidate.roots) || candidate.repositories !== void 0 && (typeof candidate.repositories !== "object" || candidate.repositories === null || Array.isArray(candidate.repositories))) {
+    throw new RequirementsError("requirements_mapping_invalid", "Requirements mapping must contain version 1 and a roots object");
+  }
+  const roots = {};
+  for (const [source, destination] of Object.entries(candidate.roots)) {
+    if (!isAbsolute3(source) || typeof destination !== "string" || !destination.trim() || !isAbsolute3(destination)) {
+      throw new RequirementsError("requirements_mapping_invalid", "Requirements mapping roots must use absolute source and canonical paths");
+    }
+    roots[resolve3(source)] = resolve3(destination);
+  }
+  const repositories = {};
+  for (const [identity, destination] of Object.entries(candidate.repositories ?? {})) {
+    const normalized = normalizeRepositoryIdentity(identity);
+    if (!normalized || normalized !== identity || typeof destination !== "string" || !destination.trim() || !isAbsolute3(destination)) {
+      throw new RequirementsError("requirements_mapping_invalid", "Requirements repository mappings must use normalized host/owner/repository keys and absolute canonical paths");
+    }
+    repositories[normalized] = resolve3(destination);
+  }
+  return { version: 1, roots, repositories };
+}
+async function canonicalRoot(cwd, testRoot) {
+  if (typeof cwd !== "string" || !cwd.trim()) throw new RequirementsError("requirements_cwd_invalid", "cwd must be a non-empty path");
+  const roots = await projectRoots(cwd);
+  const mapping = await loadMapping(testRoot);
+  for (const root of roots) {
+    for (const [source, destination] of Object.entries(mapping.roots)) {
+      if (samePath(root, source)) return { root: destination, mapped: true };
+    }
+  }
+  const identity = await repositoryIdentity(roots[0]);
+  if (identity && mapping.repositories[identity]) return { root: mapping.repositories[identity], mapped: true };
+  return { root: roots.at(-1), mapped: false };
+}
+function normalizeRepositoryIdentity(value) {
+  const text = value.trim();
+  const plain = /^([a-z0-9.-]+)\/([a-z0-9_.-]+)\/([a-z0-9_.-]+)$/i.exec(text);
+  if (plain && !plain[3].toLowerCase().endsWith(".git")) return `${plain[1].toLowerCase()}/${plain[2].toLowerCase()}/${plain[3].toLowerCase()}`;
+  const ssh = /^git@([a-z0-9.-]+):([a-z0-9_.-]+)\/([a-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(text);
+  if (ssh) return `${ssh[1].toLowerCase()}/${ssh[2].toLowerCase()}/${ssh[3].toLowerCase()}`;
+  try {
+    const url = new URL(text);
+    if (url.protocol !== "https:" || url.username || url.password || url.port || url.search || url.hash) return void 0;
+    const pieces = url.pathname.replace(/^\/+|\/+$/g, "").split("/");
+    if (pieces.length !== 2 || !/^[a-z0-9_.-]+$/i.test(pieces[0]) || !/^[a-z0-9_.-]+(?:\.git)?$/i.test(pieces[1])) return void 0;
+    return `${url.hostname.toLowerCase()}/${pieces[0].toLowerCase()}/${pieces[1].replace(/\.git$/i, "").toLowerCase()}`;
+  } catch {
+    return void 0;
+  }
+}
+async function repositoryIdentity(repositoryRoot) {
+  try {
+    const result = await execFile2("git", ["-C", repositoryRoot, "config", "--get", "remote.origin.url"], {
+      windowsHide: true,
+      maxBuffer: 64 * 1024,
+      env: { ...process.env, LC_ALL: "C", LANG: "C" }
+    });
+    return normalizeRepositoryIdentity(result.stdout.trim());
+  } catch (error2) {
+    const details = error2;
+    if (details.code === 1) return void 0;
+    throw new RequirementsError("requirements_repository_unreadable", "Git remote identity could not be resolved; check repository availability and permissions");
+  }
+}
+async function readRequirementFile(path, required2) {
+  try {
+    const details = await lstat2(path);
+    if (!details.isFile() || details.isSymbolicLink()) {
+      throw new RequirementsError("requirements_file_invalid", "REQUIREMENTS.md must be a regular non-symlink file");
+    }
+    const content = await readFile2(path, "utf8");
+    if (Buffer.byteLength(content, "utf8") > MAX_REQUIREMENTS_BYTES) {
+      throw new RequirementsError("requirements_file_too_large", "REQUIREMENTS.md exceeds the 128 KiB limit");
+    }
+    return { content, exists: true };
+  } catch (error2) {
+    if (error2 instanceof RequirementsError) throw error2;
+    if (error2.code === "ENOENT") {
+      if (required2) throw new RequirementsError("requirements_file_missing", "Configured canonical REQUIREMENTS.md is missing; restore or initialize the mapped project requirements");
+      return { content: "", exists: false };
+    }
+    throw new RequirementsError("requirements_file_unreadable", "REQUIREMENTS.md could not be read; check filesystem availability and permissions");
+  }
+}
+async function readRequirements(cwd, options = {}) {
+  const canonical = await canonicalRoot(cwd, options.testRoot);
+  const path = join2(canonical.root, REQUIREMENTS_FILE);
+  const current = await readRequirementFile(path, canonical.mapped);
+  return { path, canonicalRoot: canonical.root, content: current.content, exists: current.exists, fingerprint: fingerprint(current.content) };
+}
+function validateRequirements(content) {
+  if (typeof content !== "string" || !content.trim()) {
+    throw new RequirementsError("requirements_content_invalid", "REQUIREMENTS.md must not be empty");
+  }
+  if (Buffer.byteLength(content, "utf8") > MAX_REQUIREMENTS_BYTES) {
+    throw new RequirementsError("requirements_content_too_large", "REQUIREMENTS.md exceeds the 128 KiB limit");
+  }
+  if (!/^# Requirements\s*$/m.test(content)) {
+    throw new RequirementsError("requirements_content_invalid", "REQUIREMENTS.md must start with a # Requirements heading");
+  }
+  const entries = content.split(/^##\s+/m).slice(1);
+  for (const entry of entries) {
+    const heading = entry.split(/\r?\n/, 1)[0]?.trim();
+    if (!heading) {
+      throw new RequirementsError("requirements_content_invalid", "Each requirement entry needs a non-empty heading");
+    }
+    for (const field of ["Scope", "Source", "Decision"]) {
+      if (!new RegExp(`^[-*]\\s*${field}:\\s*\\S.+$`, "mi").test(entry)) {
+        throw new RequirementsError("requirements_content_invalid", `Each requirement entry must include ${field}:`);
+      }
+    }
+    if (!/^[-*]\s*Source:\s*(Jordan|User)\b/im.test(entry)) {
+      throw new RequirementsError("requirements_content_invalid", "Each requirement entry Source must identify Jordan or User");
+    }
+  }
+}
+async function updateRequirements(cwd, input, options = {}) {
+  if (!input || typeof input.expected_fingerprint !== "string" || !/^sha256:[a-f0-9]{64}$/.test(input.expected_fingerprint)) {
+    throw new RequirementsError("requirements_fingerprint_invalid", "expected_fingerprint must be a sha256 fingerprint returned by requirements_read");
+  }
+  validateRequirements(input.content);
+  const resolved = await readRequirements(cwd, options);
+  if (!inside(resolved.canonicalRoot, resolved.path)) {
+    throw new RequirementsError("requirements_path_invalid", "Resolved REQUIREMENTS.md must remain inside the canonical root");
+  }
+  const lockPath = `${resolved.path}.lock`;
+  try {
+    await mkdir(dirname2(resolved.path), { recursive: true });
+    try {
+      await mkdir(lockPath);
+    } catch (error2) {
+      if (error2.code === "EEXIST") {
+        throw new RequirementsError("requirements_update_in_progress", "REQUIREMENTS.md is being updated; read it again and retry with the current fingerprint");
+      }
+      throw error2;
+    }
+    try {
+      const current = await readRequirements(cwd, options);
+      if (current.path !== resolved.path || current.fingerprint !== input.expected_fingerprint) {
+        throw new RequirementsError("requirements_revision_conflict", "REQUIREMENTS.md changed; read its current fingerprint before updating it");
+      }
+      const temporary = join2(dirname2(resolved.path), `.${REQUIREMENTS_FILE}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
+      try {
+        await writeFile(temporary, input.content, { encoding: "utf8", flag: "wx", mode: 384 });
+        await rename(temporary, resolved.path);
+      } finally {
+        await unlink(temporary).catch(() => void 0);
+      }
+    } finally {
+      await rmdir(lockPath).catch(() => void 0);
+    }
+  } catch (error2) {
+    if (error2 instanceof RequirementsError) throw error2;
+    throw new RequirementsError("requirements_write_failed", "REQUIREMENTS.md could not be updated atomically; check filesystem availability and permissions");
+  }
+  return readRequirements(cwd, options);
 }
 
 // src/client.ts
@@ -17053,7 +17304,50 @@ var ManagedClient = class _ManagedClient {
 function asBridgeError(error2) {
   if (error2 instanceof BridgeError) return error2;
   if (error2 instanceof ConfigError) return new BridgeError(error2.code, error2.message);
+  if (error2 instanceof RequirementsError) return new BridgeError(error2.code, error2.message);
   return new BridgeError("bridge_error", "The orchestration bridge could not complete the request");
+}
+
+// src/requirements_session.ts
+import { createHash as createHash2, randomUUID } from "node:crypto";
+import { mkdir as mkdir2, readFile as readFile3, rename as rename2, unlink as unlink2, writeFile as writeFile2 } from "node:fs/promises";
+import { join as join3 } from "node:path";
+function statePath(sessionId, testRoot) {
+  if (!sessionId) throw new RequirementsError("requirements_session_missing", "Native session identity is required");
+  const id = createHash2("sha256").update(sessionId).digest("hex");
+  return join3(orchestrationPaths(process.env, testRoot).state, "requirements-sessions", `${id}.json`);
+}
+async function readRequirementSession(sessionId, testRoot) {
+  try {
+    return JSON.parse(await readFile3(statePath(sessionId, testRoot), "utf8"));
+  } catch (error2) {
+    if (error2.code === "ENOENT") return void 0;
+    throw error2;
+  }
+}
+async function writeRequirementSession(sessionId, state, testRoot) {
+  const path = statePath(sessionId, testRoot);
+  await mkdir2(join3(path, ".."), { recursive: true });
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile2(temporary, JSON.stringify(state), { encoding: "utf8", mode: 384 });
+    await rename2(temporary, path);
+  } finally {
+    await unlink2(temporary).catch(() => void 0);
+  }
+}
+async function acknowledgeRequirements(sessionId, args, testRoot) {
+  if (!args || typeof args.cwd !== "string" || typeof args.turn_id !== "string" || !["updated", "unchanged"].includes(args.outcome)) {
+    throw new RequirementsError("requirements_ack_invalid", "cwd, turn_id, fingerprint and outcome are required");
+  }
+  const state = await readRequirementSession(sessionId, testRoot);
+  const current = await readRequirements(args.cwd, { testRoot });
+  if (!state || state.pendingTurn !== args.turn_id) throw new RequirementsError("requirements_turn_mismatch", "Acknowledge the current user turn only; no pending user turn was recorded or the supplied turn differs");
+  const original = await readRequirements(state.cwd, { testRoot });
+  if (original.path !== current.path) throw new RequirementsError("requirements_project_mismatch", "Acknowledge this task's project only");
+  if (current.fingerprint !== args.fingerprint) throw new RequirementsError("requirements_changed", "Read the current requirements before acknowledging");
+  await writeRequirementSession(sessionId, { ...state, fingerprint: current.fingerprint, acknowledgedTurn: args.turn_id, reminderPrompt: void 0 }, testRoot);
+  return { acknowledged: true };
 }
 
 // src/server.ts
@@ -17130,6 +17424,7 @@ var operationArgSchemas = {
           project_number: { type: "integer", minimum: 1 },
           status_field_id: { type: "string", minLength: 1 },
           projection_field_id: { type: "string", minLength: 1 },
+          requirements_path: { type: "string", minLength: 1, description: "Operator-configured absolute canonical REQUIREMENTS.md path, read by Symphony for every assignment." },
           status_options: { type: "object", minProperties: 1, additionalProperties: { type: "string", minLength: 1 } },
           repositories: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } }
         },
@@ -17320,6 +17615,45 @@ var tools = [
       additionalProperties: false
     }
   },
+  {
+    name: "orchestration_requirements_read",
+    description: "Read the canonical project REQUIREMENTS.md without contacting Symphony. The result includes the current content and fingerprint; linked worktrees resolve to the configured canonical root.",
+    inputSchema: {
+      type: "object",
+      properties: { cwd: { type: "string", minLength: 1, description: "Explicit repository or worktree path for the user's task." } },
+      required: ["cwd"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "orchestration_requirements_update",
+    description: "Atomically update canonical REQUIREMENTS.md using the fingerprint returned by requirements_read. Requires trusted native caller metadata. Record only explicit lasting user directions with scope, source, decision, and supersession when applicable; workers may read but must not invent requirements.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: { type: "string", minLength: 1, description: "Repository or worktree path." },
+        expected_fingerprint: { type: "string", pattern: "^sha256:[a-f0-9]{64}$", description: "Current fingerprint from requirements_read." },
+        content: { type: "string", minLength: 1, maxLength: 131072, description: "Complete validated REQUIREMENTS.md content." }
+      },
+      required: ["cwd", "expected_fingerprint", "content"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "orchestration_requirements_acknowledge",
+    description: "Record that the root task considered the current user turn for lasting requirements. Use updated after successful capture, or unchanged when current requirements already reflect the user's direction or no lasting change was given.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: { type: "string", minLength: 1 },
+        turn_id: { type: "string", minLength: 1 },
+        fingerprint: { type: "string", pattern: "^sha256:[a-f0-9]{64}$" },
+        outcome: { type: "string", enum: ["updated", "unchanged"] }
+      },
+      required: ["cwd", "turn_id", "fingerprint", "outcome"],
+      additionalProperties: false
+    }
+  },
   ...controlOperations.map((operation) => ({
     name: `orchestration_${operation}`,
     description: `Submit the ${operation} operation to Symphony using the trusted Codex thread identity in request metadata. Supply a caller-owned request_id and the operation-specific args; the bridge preserves both and never retries writes.`,
@@ -17373,6 +17707,12 @@ function requireNativePm(operation, caller, args) {
   }
   return caller;
 }
+function requirementsCwd(args) {
+  if (!isJsonObject(args)) throw new BridgeError("requirements_args_invalid", "requirements arguments must be an object");
+  const cwd = args.cwd;
+  if (typeof cwd !== "string" || !cwd.trim()) throw new BridgeError("requirements_cwd_invalid", "cwd must be a non-empty path");
+  return cwd;
+}
 function jsonResult(value) {
   return { content: [{ type: "text", text: JSON.stringify(value) }] };
 }
@@ -17382,7 +17722,7 @@ function errorResult(error2) {
 }
 async function runBridge(testRoot) {
   const server = new Server(
-    { name: "codex-orchestration", version: "0.4.0" },
+    { name: "codex-orchestration", version: "0.5.0" },
     { capabilities: { tools: {} } }
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
@@ -17391,6 +17731,28 @@ async function runBridge(testRoot) {
       const name = request.params.name;
       const caller = nativeCaller(request);
       if (name === "orchestration_diagnostics") return jsonResult(await validateConfig(testRoot));
+      if (name === "orchestration_requirements_read") {
+        const args = request.params.arguments ?? {};
+        return jsonResult(await readRequirements(requirementsCwd(args), { testRoot }));
+      }
+      if (name === "orchestration_requirements_update") {
+        if (!caller) throw new BridgeError("caller_identity_required", "requirements updates require Codex _meta.threadId");
+        const args = request.params.arguments ?? {};
+        const cwd = requirementsCwd(args);
+        if (!isJsonObject(args) || typeof args.expected_fingerprint !== "string" || typeof args.content !== "string") {
+          throw new BridgeError("requirements_args_invalid", "expected_fingerprint and content are required");
+        }
+        return jsonResult(await updateRequirements(cwd, { expected_fingerprint: args.expected_fingerprint, content: args.content }, { testRoot }));
+      }
+      if (name === "orchestration_requirements_acknowledge") {
+        if (!caller) throw new BridgeError("caller_identity_required", "requirements acknowledgement requires Codex _meta.threadId");
+        const args = request.params.arguments ?? {};
+        const cwd = requirementsCwd(args);
+        if (!isJsonObject(args) || typeof args.turn_id !== "string" || typeof args.fingerprint !== "string" || args.outcome !== "updated" && args.outcome !== "unchanged") {
+          throw new BridgeError("requirements_args_invalid", "cwd, turn_id, fingerprint, and outcome are required");
+        }
+        return jsonResult(await acknowledgeRequirements(caller.threadId, { cwd, turn_id: args.turn_id, fingerprint: args.fingerprint, outcome: args.outcome }, testRoot));
+      }
       if (name === "orchestration_state") {
         const client = await ManagedClient.fromConfig(caller?.threadId, testRoot);
         const args = request.params.arguments ?? {};
@@ -17426,7 +17788,7 @@ async function runBridge(testRoot) {
   server.onclose = () => process.exit(0);
   await server.connect(new StdioServerTransport());
 }
-if (process.argv[1] && resolve3(process.argv[1]) === resolve3(fileURLToPath(import.meta.url))) {
+if (process.argv[1] && resolve4(process.argv[1]) === resolve4(fileURLToPath(import.meta.url))) {
   await runBridge();
 }
 export {

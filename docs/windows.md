@@ -1,6 +1,6 @@
 # Windows 11 x64 operation
 
-Version 0.4.0 supports Windows 11 x64 only. It does not start an alternate
+Version 0.5.0 supports Windows 11 x64 only. It does not start an alternate
 runtime, translate paths, inspect Codex desktop internals, copy profiles or
 cookies, or install a second Codex CLI.
 
@@ -38,7 +38,7 @@ installation.
 Setup accepts a standard Windows Mix release ZIP. The staged version must
 contain `bin\symphony.bat`, disable Erlang distribution in its versioned
 `env.bat`, and omit `releases\COOKIE`; the release directory is immutable after staging.
-Use the 0.4.0 release-manifest.json that pins repository iharc-jordan/symphony,
+Use the 0.5.0 release-manifest.json that pins repository iharc-jordan/symphony,
 the exact runtime source revision, HTTPS GitHub download URL, and SHA-256.
 Alternatively provide an offline ZIP with the same expected digest through --sha256. The
 plugin verifies the digest before extracting either source.

@@ -1,6 +1,6 @@
 {
   "name": "codex-orchestration",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A native Windows MCP bridge for managed Symphony delivery routing and lifecycle control.",
   "license": "Apache-2.0",
   "type": "module",
@@ -9,7 +9,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "npm run build:server && npm run build:cli-bundle && npm run build:cli",
+    "build": "npm run build:server && npm run build:cli-bundle && npm run build:hooks && npm run build:cli",
+    "build:hooks": "esbuild src/requirements_hook.ts --bundle --platform=node --format=esm --target=node20 --outfile=mcp/requirements-hook.mjs",
     "build:server": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node20 --outfile=mcp/server.mjs",
     "build:cli-bundle": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node20 --outfile=mcp/cli.mjs",
     "build:cli": "tsc --outDir dist",

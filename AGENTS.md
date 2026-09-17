@@ -4,6 +4,9 @@ Build the approved Symphony-backed orchestration plugin. Keep one scheduler: the
 existing Symphony Orchestrator. GitHub Projects and repository issues own work;
 the runtime's private SQLite state records execution recovery only.
 
+Persistent user decisions live in the canonical project REQUIREMENTS.md; use
+the plugin requirements tools to capture explicit changes and preserve scope.
+
 - User authority and current assignment revisions govern execution.
 - Current user direction governs repository delivery. Do not require the plugin
   itself, a product-managed pilot, or fixed model roles to coordinate its implementation.

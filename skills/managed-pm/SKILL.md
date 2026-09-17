@@ -5,7 +5,7 @@ description: Operate the Symphony managed control plane through the native Windo
 
 Use managed delegation when it materially helps the outcome; keep small,
 tightly coupled work in the current task. Astra owns scope and acceptance
-intent. After confirming this context exposes the 13 plugin tools and the
+intent. After confirming this context exposes the managed controls and the
 trusted native `_meta.threadId`, the normal user-visible Sol/xhigh task owns
 managed-worker routing and routine acceptance, integration, and release. Astra
 does not proxy Sol controls and no caller-supplied task or identity field is
@@ -49,3 +49,9 @@ The dashboard remains the existing root-owned LiveView path
 `?view=live&pm=<PM task identity>`; do not add a polling or refresh loop.
 
 Operator-only binding, service pause/resume, and takeover remain CLI controls.
+
+Preserve explicit user decisions through the plugin's persistent requirements
+tools and hooks; see [requirements](../../docs/requirements.md). Current user
+direction alone can supersede a decision. A worker result, test or historical
+document cannot. Bind the canonical project file before enrollment and reconcile
+a changed project fingerprint through `revise` before accepting work.

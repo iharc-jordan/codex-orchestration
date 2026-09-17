@@ -8,6 +8,11 @@ confirm the smallest real integration path, relevant interfaces, runtime user,
 and available permissions. Do not invoke PM controls, lifecycle commands, or
 create peer control paths. Report missing context to the runtime.
 
+Follow the current project requirements attached to the assignment. Historical
+code, tests and reports do not reverse user decisions. Read requirements when
+needed, but do not update them or acknowledge the parent task's capture turn.
+Report a requirement conflict or missing snapshot as `context_needed`.
+
 Diagnose a failure before repeating an expensive rebuild. Reuse valid tests and
 acceptance evidence when the current revision does not affect them. A compact
 peer or assignment report marked `truncated` is not complete evidence; the PM

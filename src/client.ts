@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { BridgeConfig, ConfigError, loadConfig, readToken } from "./config.js";
+import { RequirementsError } from "./requirements.js";
 
 export type ControlOperation = "bind_project" | "enroll" | "register_pm" | "claim" | "revise" | "pause" | "resume" | "interrupt" | "cancel" | "review" | "handoff" | "operator_takeover";
 export type ManagedPhase = "ready" | "active" | "review" | "accepted" | "waiting" | "cancelled";
@@ -24,6 +25,7 @@ export interface ManagedWorker {
 }
 
 export interface ProjectBinding {
+  requirements_path?: string;
   project_id: string;
   project_number: number;
   status_field_id: string;
@@ -33,6 +35,7 @@ export interface ProjectBinding {
 }
 
 export interface ManagedAssignment {
+  project_requirements_fingerprint?: string;
   assignment_id?: string;
   repository?: string;
   issue_number?: number;
@@ -464,5 +467,6 @@ export class ManagedClient {
 export function asBridgeError(error: unknown): BridgeError {
   if (error instanceof BridgeError) return error;
   if (error instanceof ConfigError) return new BridgeError(error.code, error.message);
+  if (error instanceof RequirementsError) return new BridgeError(error.code, error.message);
   return new BridgeError("bridge_error", "The orchestration bridge could not complete the request");
 }

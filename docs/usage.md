@@ -11,13 +11,13 @@ the included workflow template, replacing its project-specific values, or
 provide another absolute workflow path:
 
     Copy-Item .\fixtures\WORKFLOW.example.md C:\Users\you\Downloads\WORKFLOW.md
-    node .\mcp\cli.mjs setup --release-manifest .\release-manifest.json --workflow C:\Users\you\Downloads\WORKFLOW.md --version 0.4.0
+    node .\mcp\cli.mjs setup --release-manifest .\release-manifest.json --workflow C:\Users\you\Downloads\WORKFLOW.md --version 0.5.0
     node .\mcp\cli.mjs start
     node .\mcp\cli.mjs diagnostics
     node .\mcp\cli.mjs pause
     node .\mcp\cli.mjs resume
     node .\mcp\cli.mjs stop
-    node .\mcp\cli.mjs upgrade --release-manifest .\release-manifest.json --version 0.4.0
+    node .\mcp\cli.mjs upgrade --release-manifest .\release-manifest.json --version 0.5.0
     node .\mcp\cli.mjs rollback
     node .\mcp\cli.mjs uninstall
 
@@ -43,7 +43,7 @@ are redacted.
 For an offline archive, use `--executable C:\path\release.zip` with
 `--sha256` followed by the same 64-character digest recorded in the published
 trusted release manifest. The manifest identifies iharc-jordan/symphony
-v0.4.0 and its release-owned runtime revision, download URL, and SHA-256. Do
+v0.5.0 and its release-owned runtime revision, download URL, and SHA-256. Do
 not hand-write or substitute a digest.
 
 The bridge publishes 13 tools immediately. Mutations preserve caller request

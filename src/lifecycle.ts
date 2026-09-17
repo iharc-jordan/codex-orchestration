@@ -100,17 +100,17 @@ function releaseVersion(input: string | undefined): string {
   if (!RELEASE_PATTERN.test(value)) throw new LifecycleError("version_invalid", "version must contain only letters, numbers, dots, underscores, and hyphens");
   return value;
 }
-export interface RuntimeReleaseManifest { repository: "iharc-jordan/symphony"; version: "0.4.0"; runtimeDownloadUrl: string; sha256: string; distribution: "none"; cookieFile: "absent"; }
+export interface RuntimeReleaseManifest { repository: "iharc-jordan/symphony"; version: "0.5.0"; runtimeDownloadUrl: string; sha256: string; distribution: "none"; cookieFile: "absent"; }
 export function validateReleaseManifest(value: unknown): RuntimeReleaseManifest {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new LifecycleError("release_manifest_invalid", "release manifest must be an object");
   const raw = value as Record<string, unknown>;
-  if (raw.repository !== "iharc-jordan/symphony" || raw.version !== "0.4.0") throw new LifecycleError("release_manifest_invalid", "release manifest must identify iharc-jordan/symphony version 0.4.0");
+  if (raw.repository !== "iharc-jordan/symphony" || raw.version !== "0.5.0") throw new LifecycleError("release_manifest_invalid", "release manifest must identify iharc-jordan/symphony version 0.5.0");
   if (typeof raw.runtimeDownloadUrl !== "string" || typeof raw.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(raw.sha256)) throw new LifecycleError("release_manifest_invalid", "release manifest requires runtimeDownloadUrl and a SHA-256 digest");
   if (raw.distribution !== "none" || raw.cookieFile !== "absent") throw new LifecycleError("release_manifest_invalid", "release manifest must disable Erlang distribution and omit the cookie file");
   let url: URL;
   try { url = new URL(raw.runtimeDownloadUrl); } catch { throw new LifecycleError("release_manifest_invalid", "runtimeDownloadUrl must be an HTTPS GitHub release URL"); }
-  if (url.protocol !== "https:" || url.hostname !== "github.com" || !url.pathname.startsWith("/iharc-jordan/symphony/releases/download/v0.4.0/")) throw new LifecycleError("release_manifest_invalid", "runtimeDownloadUrl must pin the Symphony v0.4.0 GitHub release");
-  return { repository: "iharc-jordan/symphony", version: "0.4.0", runtimeDownloadUrl: url.toString(), sha256: raw.sha256.toLowerCase(), distribution: "none", cookieFile: "absent" };
+  if (url.protocol !== "https:" || url.hostname !== "github.com" || !url.pathname.startsWith("/iharc-jordan/symphony/releases/download/v0.5.0/")) throw new LifecycleError("release_manifest_invalid", "runtimeDownloadUrl must pin the Symphony v0.5.0 GitHub release");
+  return { repository: "iharc-jordan/symphony", version: "0.5.0", runtimeDownloadUrl: url.toString(), sha256: raw.sha256.toLowerCase(), distribution: "none", cookieFile: "absent" };
 }
 function absolute(input: string, label: string): string {
   if (!isAbsolute(input)) throw new LifecycleError(label + "_invalid", label + " must be an absolute Windows path");
@@ -392,7 +392,7 @@ async function verifiedReleaseSource(p: LifecyclePaths, options: LifecycleOption
     try { finalUrl = new URL(response.url || manifest.runtimeDownloadUrl); } catch { throw new LifecycleError("release_download_failed", "pinned Symphony release URL was invalid"); }
     const githubReleaseHosts = new Set(["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "github-releases.githubusercontent.com"]);
     if (finalUrl.protocol !== "https:" || !githubReleaseHosts.has(finalUrl.hostname.toLowerCase())) throw new LifecycleError("release_download_failed", "pinned Symphony release redirected outside GitHub");
-    if (finalUrl.hostname.toLowerCase() === "github.com" && !finalUrl.pathname.startsWith("/iharc-jordan/symphony/releases/download/v0.4.0/")) throw new LifecycleError("release_download_failed", "pinned Symphony release redirected to an unapproved GitHub path");
+    if (finalUrl.hostname.toLowerCase() === "github.com" && !finalUrl.pathname.startsWith("/iharc-jordan/symphony/releases/download/v0.5.0/")) throw new LifecycleError("release_download_failed", "pinned Symphony release redirected to an unapproved GitHub path");
     if (!response.ok) throw new LifecycleError("release_download_failed", "could not download the pinned Symphony release ZIP");
     await writeFile(source, Buffer.from(await response.arrayBuffer()), { mode: 0o600 });
   }

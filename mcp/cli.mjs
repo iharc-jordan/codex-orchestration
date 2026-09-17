@@ -32,6 +32,7 @@ function orchestrationPaths(env = process.env, testRoot) {
     token: join(config, "token"),
     controllerEnvironment: join(config, "controller-env.json"),
     bridgeConfig: join(config, "config.json"),
+    requirementsConfig: join(config, "requirements.json"),
     launcher: join(root, "run-orchestration.cmd"),
     runner: join(root, "run-orchestration.ps1"),
     taskXml: join(root, "task.xml"),
@@ -147,6 +148,12 @@ async function validateConfig(testRoot) {
     return { valid: false, configFile, error: `${safe.code}: ${safe.message}` };
   }
 }
+
+// src/requirements.ts
+import { execFile as execFileCallback2 } from "node:child_process";
+import { promisify as promisify2 } from "node:util";
+var execFile2 = promisify2(execFileCallback2);
+var MAX_REQUIREMENTS_BYTES = 128 * 1024;
 
 // src/client.ts
 var BridgeError = class extends Error {
@@ -317,14 +324,14 @@ var ManagedClient = class _ManagedClient {
 // src/lifecycle.ts
 import { lstat as lstat2, mkdir, open, readFile as readFile2, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { execFile as execFileCallback2 } from "node:child_process";
+import { execFile as execFileCallback3 } from "node:child_process";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { dirname as dirname2, extname, isAbsolute as isAbsolute3, join as join2, resolve as resolve3 } from "node:path";
-import { promisify as promisify2 } from "node:util";
-var execFile2 = promisify2(execFileCallback2);
+import { promisify as promisify3 } from "node:util";
+var execFile3 = promisify3(execFileCallback3);
 var DEFAULT_PORT = 8787;
 var RELEASE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 var TASK_NAME = "CodexOrchestration";
@@ -347,7 +354,7 @@ function paths(options = {}) {
 }
 async function run(command2, args, allowFailure = false) {
   try {
-    const value = await execFile2(command2, args, { windowsHide: true, maxBuffer: 1048576 });
+    const value = await execFile3(command2, args, { windowsHide: true, maxBuffer: 1048576 });
     return { stdout: value.stdout, stderr: value.stderr, code: 0 };
   } catch (cause) {
     const value = cause;
@@ -408,7 +415,7 @@ function releaseVersion(input) {
 function validateReleaseManifest(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new LifecycleError("release_manifest_invalid", "release manifest must be an object");
   const raw = value;
-  if (raw.repository !== "iharc-jordan/symphony" || raw.version !== "0.4.0") throw new LifecycleError("release_manifest_invalid", "release manifest must identify iharc-jordan/symphony version 0.4.0");
+  if (raw.repository !== "iharc-jordan/symphony" || raw.version !== "0.5.0") throw new LifecycleError("release_manifest_invalid", "release manifest must identify iharc-jordan/symphony version 0.5.0");
   if (typeof raw.runtimeDownloadUrl !== "string" || typeof raw.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(raw.sha256)) throw new LifecycleError("release_manifest_invalid", "release manifest requires runtimeDownloadUrl and a SHA-256 digest");
   if (raw.distribution !== "none" || raw.cookieFile !== "absent") throw new LifecycleError("release_manifest_invalid", "release manifest must disable Erlang distribution and omit the cookie file");
   let url;
@@ -417,8 +424,8 @@ function validateReleaseManifest(value) {
   } catch {
     throw new LifecycleError("release_manifest_invalid", "runtimeDownloadUrl must be an HTTPS GitHub release URL");
   }
-  if (url.protocol !== "https:" || url.hostname !== "github.com" || !url.pathname.startsWith("/iharc-jordan/symphony/releases/download/v0.4.0/")) throw new LifecycleError("release_manifest_invalid", "runtimeDownloadUrl must pin the Symphony v0.4.0 GitHub release");
-  return { repository: "iharc-jordan/symphony", version: "0.4.0", runtimeDownloadUrl: url.toString(), sha256: raw.sha256.toLowerCase(), distribution: "none", cookieFile: "absent" };
+  if (url.protocol !== "https:" || url.hostname !== "github.com" || !url.pathname.startsWith("/iharc-jordan/symphony/releases/download/v0.5.0/")) throw new LifecycleError("release_manifest_invalid", "runtimeDownloadUrl must pin the Symphony v0.5.0 GitHub release");
+  return { repository: "iharc-jordan/symphony", version: "0.5.0", runtimeDownloadUrl: url.toString(), sha256: raw.sha256.toLowerCase(), distribution: "none", cookieFile: "absent" };
 }
 function absolute(input, label) {
   if (!isAbsolute3(input)) throw new LifecycleError(label + "_invalid", label + " must be an absolute Windows path");
@@ -716,7 +723,7 @@ async function verifiedReleaseSource(p, options) {
     }
     const githubReleaseHosts = /* @__PURE__ */ new Set(["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "github-releases.githubusercontent.com"]);
     if (finalUrl.protocol !== "https:" || !githubReleaseHosts.has(finalUrl.hostname.toLowerCase())) throw new LifecycleError("release_download_failed", "pinned Symphony release redirected outside GitHub");
-    if (finalUrl.hostname.toLowerCase() === "github.com" && !finalUrl.pathname.startsWith("/iharc-jordan/symphony/releases/download/v0.4.0/")) throw new LifecycleError("release_download_failed", "pinned Symphony release redirected to an unapproved GitHub path");
+    if (finalUrl.hostname.toLowerCase() === "github.com" && !finalUrl.pathname.startsWith("/iharc-jordan/symphony/releases/download/v0.5.0/")) throw new LifecycleError("release_download_failed", "pinned Symphony release redirected to an unapproved GitHub path");
     if (!response.ok) throw new LifecycleError("release_download_failed", "could not download the pinned Symphony release ZIP");
     await writeFile(source, Buffer.from(await response.arrayBuffer()), { mode: 384 });
   }
@@ -1297,13 +1304,13 @@ async function validateConfigForHost(testRoot) {
 }
 
 // src/lifecycle_task.ts
-import { execFile as execFileCallback3 } from "node:child_process";
+import { execFile as execFileCallback4 } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { lstat as lstat3, mkdir as mkdir2, readFile as readFile3, rename as rename2, rm as rm2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
 import { basename, dirname as dirname3, isAbsolute as isAbsolute4, join as join3, resolve as resolve4 } from "node:path";
-import { promisify as promisify3 } from "node:util";
-var execFile3 = promisify3(execFileCallback3);
+import { promisify as promisify4 } from "node:util";
+var execFile4 = promisify4(execFileCallback4);
 var TASK_PREFIX = "Codex-Orchestration-Lifecycle-";
 var TASK_DEADLINE_MS = 18e4;
 var RESULT_MAX_BYTES = 4 * 1024 * 1024;
@@ -1354,7 +1361,7 @@ function lifecycleTaskXml(node, cli, request, nonce, userSid) {
 }
 async function command(executable, args, allowFailure = false) {
   try {
-    const result = await execFile3(executable, args, { windowsHide: true, maxBuffer: 1024 * 1024, timeout: 15e3 });
+    const result = await execFile4(executable, args, { windowsHide: true, maxBuffer: 1024 * 1024, timeout: 15e3 });
     return { code: 0, stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
     const detail = error;
